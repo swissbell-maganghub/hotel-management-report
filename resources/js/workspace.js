@@ -983,8 +983,8 @@ function initWorkspace() {
             const countSpan = btn.querySelector('[data-dept-tab-count]');
             if (countSpan) {
                 countSpan.textContent = code === '' ? String(REPORTS_DATA.length) : String(countsByDept[code] || 0);
-                countSpan.className = 'font-mono-num text-[10px] px-1.5 py-0.5 rounded-full ' +
-                    (active ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-600');
+                countSpan.className = 'font-mono-num text-[10px] font-bold leading-none min-w-[1.15rem] text-center px-1 py-0.5 rounded-full ' +
+                    (active ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-700');
             }
 
             const dotSpan = btn.querySelector('[data-dept-alert-dot]');

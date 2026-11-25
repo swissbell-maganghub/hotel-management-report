@@ -69,7 +69,7 @@
                 <button type="button" data-dept-tab="" onclick="selectReportDepartment('')"
                     class="report-dept-tab-btn inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer {{ $currentDeptCode === '' ? 'bg-navy text-white border-navy shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-navy' }}">
                     <span>{{ $isEn ? 'All Departments' : 'Semua Departemen' }}</span>
-                    <span data-dept-tab-count="" class="font-mono-num text-[10px] px-1.5 py-0.5 rounded-full {{ $currentDeptCode === '' ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-600' }}">{{ $reports->count() }}</span>
+                    <span data-dept-tab-count="" class="font-mono-num text-[10px] font-bold leading-none min-w-[1.15rem] text-center px-1 py-0.5 rounded-full {{ $currentDeptCode === '' ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-700' }}">{{ $reports->count() }}</span>
                 </button>
 
                 @foreach ($submenuDepts as $dept)
@@ -84,7 +84,7 @@
                         <span class="font-mono-num text-[10px] font-bold px-1.5 py-0.5 rounded {{ $isDeptActive ? 'bg-white/15 text-white' : 'bg-white border border-slate-200 text-navy' }}">{{ $dept->code }}</span>
                         <span>{{ $dept->localizedName($locale) }}</span>
                         <span data-dept-alert-dot="{{ $dept->code }}" class="{{ $deptAlertCount > 0 ? '' : 'hidden' }} w-1.5 h-1.5 rounded-full bg-amber-500" title="{{ $deptAlertCount }} {{ $isEn ? 'needs attention' : 'perlu tindakan' }}"></span>
-                        <span data-dept-tab-count="{{ $dept->code }}" class="font-mono-num text-[10px] px-1.5 py-0.5 rounded-full {{ $isDeptActive ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-600' }}">{{ $deptCount }}</span>
+                        <span data-dept-tab-count="{{ $dept->code }}" class="font-mono-num text-[10px] font-bold leading-none min-w-[1.15rem] text-center px-1 py-0.5 rounded-full {{ $isDeptActive ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-700' }}">{{ $deptCount }}</span>
                     </button>
                 @endforeach
             </div>

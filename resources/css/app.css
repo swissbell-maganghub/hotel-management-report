@@ -404,6 +404,7 @@ html.dark .bg-slate-100\/70 {
 }
 
 html.dark .bg-slate-200\/60,
+html.dark .bg-slate-200\/70,
 html.dark .bg-gray-200 {
     background-color: rgba(38, 46, 64, 0.82);
 }
