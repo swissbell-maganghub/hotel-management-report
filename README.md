@@ -1,121 +1,117 @@
 # Hotel Management Report System
 
-**Swiss-Belhotel Waterfront Makassar** — Internal departmental reporting, POMEC utility analytics, role-based approval workflow, audit governance, and read-only AI operational assistant.
+**Swiss-Belhotel Waterfront Makassar** — Sistem pelaporan operasional antar-departemen, analitik utilitas **POMEC**, alur persetujuan **RBAC**, pusat **Audit Trail**, dan asisten AI operasional (*read-only*).
 
 ---
 
-## Core Capabilities
+## Fitur Utama
 
-- **Role-Based Executive & Operational Workspaces (`RBAC`)**
-  - **General Manager (`GM`)**: Dedicated **Executive Dashboard** (`/?tab=dashboard`) with cross-departmental compliance matrix, operational pulse (FO, F&B, HK, ENG, FIN, SLS, HR), read-only System Topology, and Chart.js analytics.
-  - **Head of Department (`HOD`) & Staff**: Departmental report authoring, draft/submit/revision/review workflow, multi-department delegation support, and workflow revision history.
-  - **IT Administrator**: **System Overview**, Executive Preview, **System Topology** & live health checks, **User Management** (accounts, active sessions, RBAC matrix, report templates, database backup snapshots), **Audit Trail** center, and AI Knowledge Base administration.
-- **Departmental Reports & Workflow (`Reports`)**
-  - Dynamic per-department table templates, attachment support, HOD review & revision loop, filterable searchable tables, and Excel (`.xlsx`) + PDF export (`PhpSpreadsheet` & `Dompdf`).
-- **POMEC Utility Analytics (`POMEC`)**
-  - Structured Excel preview/commit workflow (electricity LWBP/WBP and water consumption), interactive trend & split charts, and PDF/Excel export.
-- **Dedicated Security & Workflow Audit Center (`Audit Trail`)**
-  - Sortable, multi-filter audit log viewer (`Auth`, `RBAC`, `Reports`, `POMEC`, `Topology`, `Chatbot`, `Templates`, `Database`), JSON payload inspection modal, Workflow Approval audit view, and CSV export.
-- **Interactive AI Assistant (`Bernie`)**
-  - Read-only RBAC-scoped assistant with hybrid Knowledge Base & LLM routing (`Ollama` on-premise, `Gemini`, `OpenRouter`, `OpenAI`, or deterministic `local` fallback) and circuit-breaker protection. See [docs/chatbot.md](docs/chatbot.md).
-- **Light & Obsidian Dark Mode**
-  - Persistent Light default with optional dark mode toggle across login, workspace, Bernie chat widget, and reactive Chart.js charts.
+| Modul | Deskripsi Ringkas |
+|---|---|
+| **Executive Dashboard (GM)** | Ringkasan kepatuhan 8 departemen, *operational pulse* (FO, F&B, HK, ENG, FIN, SLS, HR), utilitas POMEC, dan Topologi Sistem (*read-only*). |
+| **Department Reports** | Input laporan berbasis template dinamis per departemen, alur review & revisi HOD, lampiran file, riwayat workflow, serta ekspor **Excel (`.xlsx`)** dan **PDF**. |
+| **POMEC Utility** | Impor Excel dengan preview berbasis hash SHA-256, pemantauan pemakaian listrik (LWBP/WBP) dan air, grafik tren, serta ekspor laporan utilitas. |
+| **User Management** | Pengelolaan akun, role, delegasi lintas departemen, pemutusan sesi aktif, aktivasi template tabel departemen, dan snapshot backup database. |
+| **Audit Trail** | Pusat audit terstruktur (*System & Security* + *Workflow Approval*) dengan filter multi-kriteria, inspeksi payload JSON, dan ekspor **CSV**. |
+| **System Topology** | Pemantauan status komponen infrastruktur, *health check* langsung, serta metrik kesiapan produksi (khusus IT Admin). |
+| **AI Assistant (Bernie)** | Asisten chat *read-only* sesuai hak akses RBAC dengan Knowledge Base, guardrail keamanan, serta dukungan LLM lokal (**Ollama**) maupun cloud (**Gemini / OpenRouter / OpenAI**). |
+| **Tema Terang & Gelap** | Default **Light Mode** dengan switcher **Obsidian Dark Mode** yang reaktif di halaman login, workspace, grafik Chart.js, dan widget Bernie. |
+
+---
+
+## Matriks Hak Akses (RBAC)
+
+| Role | Cakupan Data | Input & Review | Topologi Sistem | User Management & Audit |
+|---|---|---|---|---|
+| **General Manager (`gm`)** | Seluruh departemen | Baca & Ekspor | *Read-Only* | — |
+| **Head of Department (`hod`)** | Departemen sendiri (+ delegasi) | Input, Review & Ekspor | — | — |
+| **Admin / Staff (`staff`)** | Departemen sendiri (+ delegasi) | Input & Ekspor | — | — |
+| **IT Administrator (`it_admin`)** | Sistem & seluruh departemen | Akses penuh | Kelola & Health Check | Akses penuh |
 
 ---
 
 ## Tools & Teknologi yang Digunakan
 
-### 1. Backend & Core Framework
-
-| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
+| Lapisan | Tool / Teknologi | Versi / Konfigurasi | Fungsi Utama |
 |---|---|---|---|
-| Runtime | **PHP** | `^8.3` (terpasang `8.3.30`) | Runtime utama aplikasi server-side |
-| Framework | **Laravel Framework** (`laravel/framework`) | `v13.43.0` | Routing, Eloquent ORM, Auth, RBAC, Validation, Scheduler |
-| Dokumen Spreadsheet | **PhpSpreadsheet** (`phpoffice/phpspreadsheet`) | `5.11.0` | Impor & preview Excel POMEC serta ekspor laporan `.xlsx` |
-| Dokumen PDF | **Laravel Dompdf** (`barryvdh/laravel-dompdf`) | `v3.1.2` | Pembuatan & ekspor laporan PDF (Departemen & POMEC) |
-| CLI REPL | **Laravel Tinker** (`laravel/tinker`) | `v3.2.0` | Konsol interaktif untuk inspeksi data & debugging |
-
-### 2. Frontend, UI & Visualisasi Data
-
-| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
-|---|---|---|---|
-| Templating | **Laravel Blade + Vanilla ES Modules** | Bawaan Laravel 13 | Struktur tampilan server-rendered & interaktivitas SPA-tab (`resources/js/workspace.js`) |
-| CSS Framework | **Tailwind CSS** (`tailwindcss`, `@tailwindcss/vite`) | `4.3.5` | Desain antarmuka responsif Light Mode & Obsidian Dark Mode |
-| Asset Bundler | **Vite** (`vite`, `laravel-vite-plugin`) | `8.3.8` / `3.2.1` | Kompilasi aset produksi & Hot Module Replacement (`npm run dev`) |
-| Grafik & Chart | **Chart.js** (`chart.js`) | `4.6.1` | 8 grafik analitik interaktif (Executive Dashboard, Reports, POMEC) |
-| Tipografi Web | **Google Fonts** (`Plus Jakarta Sans`, `Inter`, `JetBrains Mono`) | CDN Webfont | Font heading, teks antarmuka, dan angka tabular monospace |
-
-### 3. Environment Lokal, Database, Storage & Operasional
-
-| Kategori | Tool / Layanan | Keterangan / Versi | Peran dalam Sistem |
-|---|---|---|---|
-| Local Dev Stack | **Laragon** | PHP `8.3.30` & MySQL `8.4.3` (Apache/Nginx, Composer) | Lingkungan development lokal Windows untuk PHP CLI, web server, & MySQL |
-| Database Produksi | **MySQL** | Versi `8.x` (`8.4.3` lokal / VLAN internal) | Penyimpanan relasional laporan, audit log, user, sesi, & cache |
-| Database Dev / Test | **SQLite** | `database.sqlite` / `:memory:` | Database ringan untuk pengembangan lokal dan suite PHPUnit |
-| Penyimpanan File | **Laravel Local Storage** (`storage/app/private`) | Terproteksi non-publik | Lampiran laporan, file preview POMEC sementara, & snapshot backup DB |
-| Penjadwalan | **Laravel Scheduler** (`php artisan schedule:run`) | Cron / Task Scheduler | Pembersihan otomatis preview POMEC kedaluwarsa (`pomec:cleanup-temp`) |
-
-### 4. AI Assistant (`Bernie`) & Keamanan
-
-| Kategori | Provider / Komponen | Konfigurasi Default | Peran dalam Sistem |
-|---|---|---|---|
-| Local LLM (On-Premise) | **Ollama** | Model `qwen3:4b-instruct` | Pemrosesan intent & narasi AI lokal tanpa keluar jaringan hotel |
-| Cloud LLM (Opsional) | **Google Gemini / OpenRouter / OpenAI** | `gemini-3.1-flash-lite` (Gemini) | Alternatif model AI cloud dengan sanitasi data & kontrol RBAC |
-| Fallback & Guardrail | **Hybrid Keyword & Knowledge Base** | Mode `local` / Circuit Breaker | Jawaban deterministik glosarium, SOP, dan proteksi saat AI offline |
-
-### 5. Testing, Code Quality & Dev Tooling
-
-| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
-|---|---|---|---|
-| Automated Testing | **PHPUnit** (`phpunit/phpunit`) | `12.5.44` | Menjalankan 48 unit & feature test suite (`php artisan test`) |
-| Code Formatter | **Laravel Pint** (`laravel/pint`) | `v1.32.3` | Standarisasi gaya penulisan kode PHP |
-| Test Helper | **Faker** & **Mockery** | `^1.23` / `^1.6` | Generator data seeder/uji & mocking HTTP/layanan |
-| Dev Runner & Log | **Concurrently**, **Laravel Pail**, **Collision** | `10.0.7` / `^1.2.5` / `^8.6` | Orkestrasi proses `dev`, pemantauan log, & pelaporan error CLI |
+| **Local Environment** | **Laragon** | PHP `8.3.30`, MySQL `8.4.3`, Apache/Nginx | Paket lingkungan development lokal di Windows |
+| **Runtime & Package** | **PHP**, **Composer**, **Node.js**, **npm** | PHP `^8.3` · Composer `2.10.1` · Node `24.16` | Runtime server-side serta manajemen dependensi PHP & JS |
+| **Backend Framework** | **Laravel Framework** (`laravel/framework`) | `v13.43.0` | Routing, Eloquent ORM, Auth, RBAC, Validasi, Scheduler |
+| **Frontend & Styling** | **Blade**, **Vanilla JS**, **Tailwind CSS** | Tailwind `4.3.5` · `@tailwindcss/vite` | Tampilan server-rendered, state workspace, Light & Dark Mode |
+| **Asset Bundler** | **Vite** (`vite`, `laravel-vite-plugin`) | `8.3.8` / `3.2.1` | Kompilasi aset CSS/JS produksi & HMR (`npm run dev`) |
+| **Visualisasi Grafik** | **Chart.js** (`chart.js`) | `4.6.1` | 8 grafik interaktif (Dashboard Eksekutif, Laporan, POMEC) |
+| **Tipografi** | **Google Fonts** | `Plus Jakarta Sans`, `Inter`, `JetBrains Mono` | Font heading, antarmuka, dan angka tabular monospace |
+| **Ekspor Dokumen** | **PhpSpreadsheet** & **Laravel Dompdf** | `5.11.0` / `v3.1.2` | Impor/ekspor Excel (`.xlsx`) dan render dokumen PDF |
+| **Database Produksi** | **MySQL** | `8.x` (`8.4.3` lokal / VLAN internal) | Penyimpanan laporan, audit log, user, sesi, dan cache |
+| **Database Dev / Test** | **SQLite** | `database.sqlite` / `:memory:` | Database ringan untuk pengembangan lokal & test suite |
+| **File Storage & Cron** | **Laravel Local Storage** & **Scheduler** | `storage/app/private` | Penyimpanan lampiran, backup DB, & cleanup preview POMEC |
+| **AI / LLM Engine** | **Ollama**, **Gemini**, **OpenRouter**, **OpenAI** | Default: `qwen3:4b-instruct` / `local` fallback | Routing intent & narasi chatbot *read-only* dengan circuit breaker |
+| **Automated Testing** | **PHPUnit**, **Faker**, **Mockery** | PHPUnit `12.5.44` (`48` tes) | Pengujian otomatis fitur, RBAC, guardrail chatbot, & UI |
+| **Code Quality & CLI** | **Laravel Pint**, **Tinker**, **Pail**, **Concurrently** | Pint `v1.32.3` · Tinker `v3.2.0` | Formatting PHP, REPL debugging, log tailing, & runner dev |
 
 ---
 
-## Quick Start (Local Development)
+## Struktur Direktori Utama
 
-1. **Install dependencies**
+```text
+app/
+├── Console/Commands/       # Evaluasi chatbot, retensi chat, & cleanup temp POMEC
+├── Http/Controllers/       # Auth, Workspace, Reports, POMEC, Topology, Admin, Chatbot
+├── Models/                 # User, Department, DepartmentReport, Pomec*, AuditLog, Chatbot*
+├── Policies/               # Otorisasi akses laporan per departemen
+└── Services/               # ChatbotService, Analytics, Export Excel/PDF, Backup, Diagnostics
+database/
+├── migrations/             # Skema tabel sistem, RBAC granular, POMEC, audit, & chatbot
+└── seeders/                # CoreSystemSeeder, ChatbotKnowledgeSeeder, DemoDataSeeder
+resources/
+├── css/app.css             # Token tema Swiss-Belhotel (Light & Obsidian Dark Mode)
+├── js/workspace.js         # Kontroler interaktif UI, filter, paginasi, Chart.js, & Bernie
+└── views/                  # Template Blade login, workspace, partial tab, & ekspor PDF
+tests/
+├── Feature/                # HotelManagementReportTest & ChatbotSpecTest (48 tes)
+└── fixtures/               # Golden evaluation set chatbot (chatbot_eval.json)
+```
+
+---
+
+## Panduan Menjalankan Secara Lokal (Laragon)
+
+1. **Siapkan proyek & dependensi**
    ```bash
    composer install
    npm install
    ```
 
-2. **Configure environment**
+2. **Konfigurasi environment**
    ```bash
    cp .env.example .env
    php artisan key:generate
    ```
-   Update database and optional `CHATBOT_PROVIDER` settings in `.env`.
+   Sesuaikan koneksi database (`DB_*` di MySQL Laragon atau SQLite) dan opsi `CHATBOT_PROVIDER` pada `.env`.
 
-3. **Migrate & seed initial data**
+3. **Migrasi & seed data awal**
    ```bash
    php artisan migrate --seed
    ```
 
-4. **Build assets & start dev server**
+4. **Build aset & jalankan server**
    ```bash
    npm run build
    php artisan serve
    ```
-   Or run `npm run dev` alongside `php artisan serve` for live HMR.
+   Untuk pengembangan aktif dengan *Hot Module Replacement*, jalankan `npm run dev` secara paralel.
 
 ---
 
-## Verification & Quality Gates
+## Pengujian & Dokumentasi Lanjutan
 
-- Run the automated feature & unit test suite (AI provider defaulted to deterministic `local` in `phpunit.xml`):
+- **Menjalankan seluruh unit & feature test** (otomatis memakai SQLite `:memory:` dan mode chatbot `local` sesuai `phpunit.xml`):
   ```bash
   php artisan test
   ```
-- Optional live LLM evaluation (see [docs/chatbot.md](docs/chatbot.md)):
+- **Evaluasi akurasi model AI secara langsung** (opsional):
   ```bash
   php artisan chatbot:eval
   ```
-
----
-
-## Production Deployment
-
-Refer to [DEPLOYMENT.md](DEPLOYMENT.md) for server prerequisites, HTTPS/VLAN security checklist, `APP_ENV=production` hardening, scheduler setup (`pomec:cleanup-temp`), and backup procedures.
+- **Panduan operasional AI Chatbot & Knowledge Base**: [docs/chatbot.md](docs/chatbot.md)
+- **Checklist deploy server produksi & keamanan VLAN**: [DEPLOYMENT.md](DEPLOYMENT.md)
