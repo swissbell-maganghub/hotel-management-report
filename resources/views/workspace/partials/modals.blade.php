@@ -367,7 +367,7 @@
                     <div>
                         <label class="block font-semibold text-slate-700 mb-1.5">{{ $isEn ? 'Primary Department' : 'Departemen Utama' }}</label>
                         <select id="user-dept-id" class="{{ $inputCls }}">
-                            <option value="">{{ $isEn ? '-- None (All Depts for GM) --' : '-- Tidak Ada (Semua Dept untuk GM) --' }}</option>
+                            <option value="">{{ $isEn ? '-- Executive (All Departments • GM / IT Admin) --' : '-- Executive (Semua Dept • GM / IT Admin) --' }}</option>
                             @foreach ($departments as $dept)
                                 <option value="{{ $dept->id }}">{{ $dept->localizedName($locale) }} ({{ $dept->code }})</option>
                             @endforeach
@@ -431,8 +431,8 @@
 
                 <div id="user-all-scope-notice" class="hidden p-3.5 rounded-xl bg-amber-50/70 border border-amber-200 text-[11px] text-amber-900">
                     {{ $isEn
-                        ? 'GM automatically gets Read-Only results across all 8 departments. IT Administrator automatically gets full access to all departments and system controls.'
-                        : 'Role GM otomatis memiliki akses lihat hasil seluruh 8 departemen. Role IT Administrator otomatis memegang kendali penuh seluruh departemen & sistem.' }}
+                        ? 'Executive accounts (GM & IT Administrator) operate outside individual departments: GM gets Read-Only results across all 7 departments, while IT Administrator manages all 7 departments and system controls.'
+                        : 'Akun Executive (GM & IT Administrator) berada di luar departemen operasional: GM otomatis memantau seluruh 7 departemen (Read-Only), sedangkan IT Administrator memegang kendali penuh seluruh 7 departemen & sistem.' }}
                 </div>
             </div>
             <div class="px-6 py-3.5 bg-slate-50/90 border-t border-slate-100 flex justify-end gap-2 shrink-0">

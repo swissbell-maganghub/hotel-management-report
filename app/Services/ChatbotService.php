@@ -702,8 +702,8 @@ class ChatbotService
         // One department typed by the user beats the model's guess ("okupansi FO" → model said FNB).
         if (($named = $this->namedDepartments($ql))->count() === 1) {
             $deptCode = $named->first()->code;
-        } elseif ($named->isEmpty() && preg_match('/\b(gm|general manager|hod|manajemen|management|direksi)\b/', $ql)) {
-            $deptCode = ''; // "laporan di gm" = for the GM (all departments); the model mapped GM → Admin & General
+        } elseif ($named->isEmpty() && preg_match('/\b(gm|general manager|it admin|it administrator|hod|manajemen|management|executive|admin & general|admin and general|ang|direksi)\b/', $ql)) {
+            $deptCode = ''; // Executive / management / GM (not an operational department) covers all operational departments
         }
         // "tanggal 17" without month/year: the model leaves date null, so parse it here.
         $i['date'] ??= $this->dateFromQuestion($ql);
@@ -766,7 +766,6 @@ class ChatbotService
             'HR' => ['hr', 'hrd', 'sdm', 'karyawan', 'personalia', 'human resource'],
             'SLS' => ['sls', 'sales', 'marketing', 'penjualan'],
             'ENG' => ['eng', 'engineering', 'enginering', 'enginer', 'teknik', 'teknisi', 'maintenance'],
-            'ANG' => ['ang', 'umum', 'security'],
             'FO' => ['fo', 'front office', 'frontoffice', 'resepsionis', 'okupansi'],
         ];
         $has = fn (string $term): bool => $term !== '' && (bool) preg_match('/(?<![\w&])'.preg_quote(Str::lower($term), '/').'(?![\w&])/u', $q);

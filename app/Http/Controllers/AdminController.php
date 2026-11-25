@@ -26,7 +26,7 @@ class AdminController extends Controller
     {
         $validated = $request->validated();
 
-        $primaryDeptId = $validated['role'] === User::ROLE_GM ? null : ($validated['department_id'] ?? null);
+        $primaryDeptId = in_array($validated['role'], [User::ROLE_GM, User::ROLE_IT_ADMIN], true) ? null : ($validated['department_id'] ?? null);
         $isReadOnly = in_array($validated['role'], [User::ROLE_HOD, User::ROLE_STAFF], true)
             ? (bool) ($validated['is_read_only'] ?? false)
             : false;
@@ -60,7 +60,7 @@ class AdminController extends Controller
     {
         $validated = $request->validated();
 
-        $primaryDeptId = $validated['role'] === User::ROLE_GM ? null : ($validated['department_id'] ?? null);
+        $primaryDeptId = in_array($validated['role'], [User::ROLE_GM, User::ROLE_IT_ADMIN], true) ? null : ($validated['department_id'] ?? null);
         $isReadOnly = in_array($validated['role'], [User::ROLE_HOD, User::ROLE_STAFF], true)
             ? (bool) ($validated['is_read_only'] ?? false)
             : false;

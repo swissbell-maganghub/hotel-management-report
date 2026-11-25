@@ -15,12 +15,6 @@ class CoreSystemSeeder extends Seeder
     {
         $departments = collect([
             [
-                'code' => 'ANG',
-                'name' => 'Admin & General',
-                'name_en' => 'Admin & General',
-                'description' => 'Administrasi umum, koordinasi manajemen, IT, dan keamanan hotel.',
-            ],
-            [
                 'code' => 'ENG',
                 'name' => 'Engineering',
                 'name_en' => 'Engineering',
@@ -68,38 +62,21 @@ class CoreSystemSeeder extends Seeder
             return [$dept['code'] => $model];
         });
 
-        // Bootstrap IT Admin account under Admin & General only if none exists yet
+        // Bootstrap Executive IT Admin account (not tied to a department) only if none exists yet
         if (! User::where('role', User::ROLE_IT_ADMIN)->exists()) {
             User::create([
                 'name' => 'IT Administrator',
                 'email' => 'it.admin@swissbel.local',
                 'password' => Hash::make(env('INITIAL_ADMIN_PASSWORD', 'ChangeMeProd#2026')),
                 'role' => User::ROLE_IT_ADMIN,
-                'department_id' => $departments['ANG']->id,
+                'department_id' => null,
                 'is_active' => true,
                 'locale' => 'id',
             ]);
         }
 
-        // 8 Department-specific report table templates
+        // 7 Operational department-specific report table templates
         $templateDefinitions = [
-            'ANG-OPS' => [
-                'department_id' => $departments['ANG']->id,
-                'name' => 'Laporan Operasional Admin & General (Manajemen / IT)',
-                'name_en' => 'Admin & General Operational Report (Mgmt / IT)',
-                'description' => 'Checklist operasional umum, infrastruktur IT, keamanan, dan tindak lanjut manajemen.',
-                'description_en' => 'General administration, IT infrastructure, security, and management follow-up checklist.',
-                'columns_schema' => [
-                    ['key' => 'unit', 'label' => 'Unit / Area', 'label_en' => 'Unit / Area', 'type' => 'text', 'required' => true],
-                    ['key' => 'activity', 'label' => 'Item / Aktivitas', 'label_en' => 'Item / Activity', 'type' => 'text', 'required' => true],
-                    ['key' => 'status', 'label' => 'Status', 'label_en' => 'Status', 'type' => 'select', 'options' => ['Normal', 'Follow-up', 'Urgent'], 'required' => true],
-                    ['key' => 'pic', 'label' => 'Penanggung Jawab', 'label_en' => 'PIC', 'type' => 'text', 'required' => true],
-                    ['key' => 'notes', 'label' => 'Catatan', 'label_en' => 'Notes', 'type' => 'text', 'required' => false],
-                ],
-                'default_rows' => [
-                    ['unit' => 'IT & Network', 'activity' => 'Pemeriksaan server laporan & backup NAS', 'status' => 'Normal', 'pic' => 'IT Admin', 'notes' => ''],
-                ],
-            ],
             'ENG-MAINT' => [
                 'department_id' => $departments['ENG']->id,
                 'name' => 'Log Preventive Maintenance & Peralatan Engineering',

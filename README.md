@@ -63,10 +63,12 @@
 | Cloud LLM (Opsional) | **Google Gemini / OpenRouter / OpenAI** | `gemini-3.1-flash-lite` (Gemini) | Alternatif model AI cloud dengan sanitasi data & kontrol RBAC |
 | Fallback & Guardrail | **Hybrid Keyword & Knowledge Base** | Mode `local` / Circuit Breaker | Jawaban deterministik glosarium, SOP, dan proteksi saat AI offline |
 
-### 5. Testing, Code Quality & Dev Tooling
+### 5. IDE, Testing, Code Quality & Dev Tooling
 
-| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
+| Kategori | Tool / Package | Versi (`lock` / Keterangan) | Peran dalam Sistem |
 |---|---|---|---|
+| AI Agentic IDE | **Google Antigravity** | Desktop IDE | Pengembangan fitur, refactoring UI/UX, debugging, & verifikasi otomatis |
+| Code Editor / IDE | **Visual Studio Code (VS Code)** | Desktop Editor | Penyuntingan kode PHP, Blade, JS, konfigurasi, & manajemen Git |
 | Automated Testing | **PHPUnit** (`phpunit/phpunit`) | `12.5.44` | Menjalankan 48 unit & feature test suite (`php artisan test`) |
 | Code Formatter | **Laravel Pint** (`laravel/pint`) | `v1.32.3` | Standarisasi gaya penulisan kode PHP |
 | Test Helper | **Faker** & **Mockery** | `^1.23` / `^1.6` | Generator data seeder/uji & mocking HTTP/layanan |
@@ -119,3 +121,72 @@
 ## Production Deployment
 
 Refer to [DEPLOYMENT.md](DEPLOYMENT.md) for server prerequisites, HTTPS/VLAN security checklist, `APP_ENV=production` hardening, scheduler setup (`pomec:cleanup-temp`), and backup procedures.
+
+---
+
+## Panduan Kerja Tim di GitHub (Agar Rapi & Tidak Bentrok)
+
+Prinsip utamanya sederhana: branch `main` **harus selalu bersih dan siap jalan**. Jadi saat mengerjakan fitur atau memperbaiki bug, kerjakan di branch terpisah dulu, lalu gabungkan ke `main` lewat **Pull Request (PR)**.
+
+### 1. Aturan Penamaan Branch & Pesan Commit
+
+| Tujuan Kerja | Format Nama Branch | Awalan Pesan Commit | Contoh |
+|---|---|---|---|
+| Bikin fitur baru | `feat/<nama-fitur>` | `feat: ...` | `feat/ekspor-audit-csv` |
+| Perbaiki bug / error | `fix/<nama-masalah>` | `fix: ...` | `fix/tombol-darkmode-login` |
+| Rapikan tampilan / kode | `refactor/<bagian>` | `refactor: ...` | `refactor/warna-darkmode` |
+| Update panduan / README | `docs/<bagian>` | `docs: ...` | `docs/panduan-tim-github` |
+
+### 2. Urutan Kerja Sehari-hari (5 Langkah)
+
+1. **Ambil update terbaru dari `main`, lalu buat branch baru** *(jangan coding langsung di `main`)*:
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout -b feat/nama-fitur
+   ```
+2. **Simpan pekerjaan secara bertahap** *(biasakan cek `git status` sebelum `git add`)*:
+   ```bash
+   git status
+   git add .
+   git commit -m "feat: jelaskan singkat apa yang baru dibuat"
+   ```
+3. **Gabungkan update terbaru dari teman (`main`) sebelum upload** *(supaya kalau ada kode bentrok, beres di laptop sendiri dulu)*:
+   ```bash
+   git fetch origin
+   git merge origin/main
+   ```
+4. **Pastikan build & tes tetap hijau sebelum upload**:
+   ```bash
+   npm run build
+   php artisan test
+   ```
+5. **Upload branch ke GitHub & buat Pull Request (PR)**:
+   ```bash
+   git push -u origin feat/nama-fitur
+   ```
+   Buka GitHub → klik **Compare & pull request** → minta minimal 1 rekan cek → klik **Merge pull request**, lalu hapus branch yang sudah selesai dipakai.
+
+### 3. Hal yang Harus Dihindari Supaya Tidak Saling Timpa Kode
+
+| Bagian | Aturan Sederhana |
+|---|---|
+| **File Migration Database** | **Jangan edit** file migration lama yang sudah masuk ke `main`. Kalau mau tambah/ubah tabel, selalu buat file baru (`php artisan make:migration ...`). |
+| **File yang Sering Diedit Bareng** | Kabari tim dulu sebelum ubah `routes/web.php`, `resources/js/workspace.js`, `resources/css/app.css`, atau `resources/views/workspace/index.blade.php` biar tidak edit bagian yang sama bersamaan. |
+| **File Rahasia & File Sementara** | **Jangan pernah upload** `.env`, API key/password, `database/*.sqlite*`, `public/hot`, `public/build`, `storage/logs/*.log`, `vendor/`, atau `node_modules/`. |
+| **Install Package Baru** | Kalau habis jalankan `composer require` atau `npm install`, file `.lock` (`composer.lock` / `package-lock.json`) wajib ikut di-commit supaya versi laptop tim sama semua. |
+
+### 4. Cara Mengatasi Jika Terjadi Bentrok (*Merge Conflict*)
+
+Kalau saat menjalankan `git merge origin/main` muncul peringatan *conflict*, jangan panik:
+
+1. Ketik `git status` untuk melihat file mana saja yang bentrok (biasanya bertanda merah / *both modified*).
+2. Buka file tersebut di **VS Code** atau **Antigravity**, lalu cari tanda `<<<<<<<`, `=======`, dan `>>>>>>>`.
+3. Pilih kode mana yang mau dipakai (kode kamu, kode teman, atau gabungkan keduanya), lalu **hapus semua garis tanda** `<<<<<<<`, `=======`, dan `>>>>>>>`.
+4. Simpan file, jalankan `npm run build` dan `php artisan test`, lalu selesaikan penggabungannya:
+   ```bash
+   git add .
+   git commit -m "fix: selesaikan conflict dengan main"
+   git push
+   ```
+   *(Kalau ragu di tengah jalan dan ingin batal dulu ke kondisi sebelum merge, ketik `git merge --abort`.)*

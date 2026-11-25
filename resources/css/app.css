@@ -287,7 +287,8 @@
         width: 72px;
     }
 
-    #app-sidebar.sidebar-collapsed .sidebar-text {
+    #app-sidebar.sidebar-collapsed .sidebar-text,
+    #app-sidebar.sidebar-collapsed #sidebar-reports-submenu {
         display: none;
     }
 
