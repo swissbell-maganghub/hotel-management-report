@@ -121,3 +121,70 @@
 ## Production Deployment
 
 Refer to [DEPLOYMENT.md](DEPLOYMENT.md) for server prerequisites, HTTPS/VLAN security checklist, `APP_ENV=production` hardening, scheduler setup (`pomec:cleanup-temp`), and backup procedures.
+
+---
+
+## GitHub Collaboration Workflow (Team Best Practices)
+
+Agar kolaborasi tim tetap rapi, kode di `main` selalu stabil, dan meminimalkan merge conflict:
+
+### 1. Konvensi Branch & Commit
+
+| Jenis Pekerjaan | Format Nama Branch | Format Pesan Commit | Contoh |
+|---|---|---|---|
+| Fitur baru | `feat/<ringkasan-singkat>` | `feat: ...` | `feat/audit-csv-export` |
+| Perbaikan bug | `fix/<ringkasan-singkat>` | `fix: ...` | `fix/login-theme-default` |
+| UI / Refactor | `refactor/<ringkasan-singkat>` | `refactor: ...` | `refactor/dark-mode-palette` |
+| Dokumentasi | `docs/<ringkasan-singkat>` | `docs: ...` | `docs/update-readme-workflow` |
+
+### 2. Alur Kerja Harian (Anti-Conflict)
+
+1. **Selalu mulai dari `main` terbaru** *(jangan coding langsung di branch `main`)*:
+   ```bash
+   git switch main
+   git pull origin main
+   git switch -c feat/nama-tugas
+   ```
+2. **Kerjakan lingkup kecil & commit bertahap** (`git status` wajib dicek sebelum `git add`):
+   ```bash
+   git add <file-yang-relevan>
+   git commit -m "feat: deskripsi perubahan yang jelas"
+   ```
+3. **Sinkronkan dengan `main` terbaru sebelum membuka Pull Request (PR)**:
+   ```bash
+   git fetch origin
+   git rebase origin/main
+   ```
+4. **Wajib lolos Quality Gate sebelum push / merge**:
+   ```bash
+   npm run build
+   php artisan test
+   ```
+5. **Push branch fitur & buka Pull Request ke `main`**:
+   ```bash
+   git push -u origin feat/nama-tugas
+   ```
+   Gunakan **Squash and Merge** atau review minimal 1 rekan tim sebelum masuk ke `main`, lalu hapus branch yang sudah selesai di-merge.
+
+### 3. Aturan Anti-Conflict Khusus Proyek Laravel
+
+| Area | Aturan Tim |
+|---|---|
+| **Database Migrations** | **Jangan mengubah** file migrasi yang sudah masuk ke `main`. Selalu buat file migrasi baru (`php artisan make:migration ...`). |
+| **File Bersama (*Hot Files*)** | Koordinasikan dengan tim saat mengubah `routes/web.php`, `resources/js/workspace.js`, `resources/css/app.css`, atau `resources/views/workspace/index.blade.php` agar tidak tumpang tindih. |
+| **Environment & Secrets** | **Dilarang** meng-commit `.env`, API key, `database/*.sqlite*`, `public/hot`, `public/build`, `storage/logs/*.log`, `vendor/`, maupun `node_modules/`. |
+| **Lockfiles** | Jika menambah package via `composer require` atau `npm install`, commit juga `composer.lock` / `package-lock.json` agar versi tim seragam. |
+
+### 4. Penanganan Jika Terjadi Conflict Saat `rebase` / PR
+
+1. Cek daftar file yang konflik dengan `git status`.
+2. Buka file bertanda `<<<<<<<`, `=======`, `>>>>>>>`, pilih/gabungkan perubahan yang benar, lalu hapus seluruh marker konflik.
+3. Jalankan pengujian (`npm run build` dan `php artisan test`) untuk memastikan kode hasil gabungan berjalan normal.
+4. Lanjutkan proses hingga selesai (atau batalkan dengan aman jika ragu):
+   ```bash
+   git add <file-yang-sudah-diperbaiki>
+   git rebase --continue
+   # Jika sudah pernah push branch fitur sebelumnya:
+   git push --force-with-lease
+   ```
+   *(Gunakan `git rebase --abort` untuk membatalkan rebase ke kondisi semula; jangan pernah force-push ke branch `main`.)*
