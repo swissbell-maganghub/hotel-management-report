@@ -23,12 +23,53 @@
 
 ---
 
-## Tech Stack
+## Tools & Teknologi yang Digunakan
 
-- **Backend**: PHP 8.3+, Laravel 13 (`laravel/framework`), Laravel Dompdf, PhpSpreadsheet
-- **Frontend**: Blade, Tailwind CSS 4 (`@tailwindcss/vite`), Vite 8, Chart.js 4
-- **Database**: MySQL 8.x (production) / SQLite (local/testing)
-- **Testing**: PHPUnit 12 (`php artisan test`)
+### 1. Backend & Core Framework
+
+| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
+|---|---|---|---|
+| Runtime | **PHP** | `^8.3` (terpasang `8.3.30`) | Runtime utama aplikasi server-side |
+| Framework | **Laravel Framework** (`laravel/framework`) | `v13.43.0` | Routing, Eloquent ORM, Auth, RBAC, Validation, Scheduler |
+| Dokumen Spreadsheet | **PhpSpreadsheet** (`phpoffice/phpspreadsheet`) | `5.11.0` | Impor & preview Excel POMEC serta ekspor laporan `.xlsx` |
+| Dokumen PDF | **Laravel Dompdf** (`barryvdh/laravel-dompdf`) | `v3.1.2` | Pembuatan & ekspor laporan PDF (Departemen & POMEC) |
+| CLI REPL | **Laravel Tinker** (`laravel/tinker`) | `v3.2.0` | Konsol interaktif untuk inspeksi data & debugging |
+
+### 2. Frontend, UI & Visualisasi Data
+
+| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
+|---|---|---|---|
+| Templating | **Laravel Blade + Vanilla ES Modules** | Bawaan Laravel 13 | Struktur tampilan server-rendered & interaktivitas SPA-tab (`resources/js/workspace.js`) |
+| CSS Framework | **Tailwind CSS** (`tailwindcss`, `@tailwindcss/vite`) | `4.3.5` | Desain antarmuka responsif Light Mode & Obsidian Dark Mode |
+| Asset Bundler | **Vite** (`vite`, `laravel-vite-plugin`) | `8.3.8` / `3.2.1` | Kompilasi aset produksi & Hot Module Replacement (`npm run dev`) |
+| Grafik & Chart | **Chart.js** (`chart.js`) | `4.6.1` | 8 grafik analitik interaktif (Executive Dashboard, Reports, POMEC) |
+| Tipografi Web | **Google Fonts** (`Plus Jakarta Sans`, `Inter`, `JetBrains Mono`) | CDN Webfont | Font heading, teks antarmuka, dan angka tabular monospace |
+
+### 3. Database, Storage & Operasional
+
+| Kategori | Tool / Layanan | Keterangan | Peran dalam Sistem |
+|---|---|---|---|
+| Database Produksi | **MySQL** | Versi `8.x` (VLAN internal) | Penyimpanan relasional laporan, audit log, user, sesi, & cache |
+| Database Dev / Test | **SQLite** | `database.sqlite` / `:memory:` | Database ringan untuk pengembangan lokal dan suite PHPUnit |
+| Penyimpanan File | **Laravel Local Storage** (`storage/app/private`) | Terproteksi non-publik | Lampiran laporan, file preview POMEC sementara, & snapshot backup DB |
+| Penjadwalan | **Laravel Scheduler** (`php artisan schedule:run`) | Cron / Task Scheduler | Pembersihan otomatis preview POMEC kedaluwarsa (`pomec:cleanup-temp`) |
+
+### 4. AI Assistant (`Bernie`) & Keamanan
+
+| Kategori | Provider / Komponen | Konfigurasi Default | Peran dalam Sistem |
+|---|---|---|---|
+| Local LLM (On-Premise) | **Ollama** | Model `qwen3:4b-instruct` | Pemrosesan intent & narasi AI lokal tanpa keluar jaringan hotel |
+| Cloud LLM (Opsional) | **Google Gemini / OpenRouter / OpenAI** | `gemini-3.1-flash-lite` (Gemini) | Alternatif model AI cloud dengan sanitasi data & kontrol RBAC |
+| Fallback & Guardrail | **Hybrid Keyword & Knowledge Base** | Mode `local` / Circuit Breaker | Jawaban deterministik glosarium, SOP, dan proteksi saat AI offline |
+
+### 5. Testing, Code Quality & Dev Tooling
+
+| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
+|---|---|---|---|
+| Automated Testing | **PHPUnit** (`phpunit/phpunit`) | `12.5.44` | Menjalankan 48 unit & feature test suite (`php artisan test`) |
+| Code Formatter | **Laravel Pint** (`laravel/pint`) | `v1.32.3` | Standarisasi gaya penulisan kode PHP |
+| Test Helper | **Faker** & **Mockery** | `^1.23` / `^1.6` | Generator data seeder/uji & mocking HTTP/layanan |
+| Dev Runner & Log | **Concurrently**, **Laravel Pail**, **Collision** | `10.0.7` / `^1.2.5` / `^8.6` | Orkestrasi proses `dev`, pemantauan log, & pelaporan error CLI |
 
 ---
 
