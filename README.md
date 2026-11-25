@@ -45,11 +45,12 @@
 | Grafik & Chart | **Chart.js** (`chart.js`) | `4.6.1` | 8 grafik analitik interaktif (Executive Dashboard, Reports, POMEC) |
 | Tipografi Web | **Google Fonts** (`Plus Jakarta Sans`, `Inter`, `JetBrains Mono`) | CDN Webfont | Font heading, teks antarmuka, dan angka tabular monospace |
 
-### 3. Database, Storage & Operasional
+### 3. Environment Lokal, Database, Storage & Operasional
 
-| Kategori | Tool / Layanan | Keterangan | Peran dalam Sistem |
+| Kategori | Tool / Layanan | Keterangan / Versi | Peran dalam Sistem |
 |---|---|---|---|
-| Database Produksi | **MySQL** | Versi `8.x` (VLAN internal) | Penyimpanan relasional laporan, audit log, user, sesi, & cache |
+| Local Dev Stack | **Laragon** | PHP `8.3.30` & MySQL `8.4.3` (Apache/Nginx, Composer) | Lingkungan development lokal Windows untuk PHP CLI, web server, & MySQL |
+| Database Produksi | **MySQL** | Versi `8.x` (`8.4.3` lokal / VLAN internal) | Penyimpanan relasional laporan, audit log, user, sesi, & cache |
 | Database Dev / Test | **SQLite** | `database.sqlite` / `:memory:` | Database ringan untuk pengembangan lokal dan suite PHPUnit |
 | Penyimpanan File | **Laravel Local Storage** (`storage/app/private`) | Terproteksi non-publik | Lampiran laporan, file preview POMEC sementara, & snapshot backup DB |
 | Penjadwalan | **Laravel Scheduler** (`php artisan schedule:run`) | Cron / Task Scheduler | Pembersihan otomatis preview POMEC kedaluwarsa (`pomec:cleanup-temp`) |
