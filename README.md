@@ -63,10 +63,12 @@
 | Cloud LLM (Opsional) | **Google Gemini / OpenRouter / OpenAI** | `gemini-3.1-flash-lite` (Gemini) | Alternatif model AI cloud dengan sanitasi data & kontrol RBAC |
 | Fallback & Guardrail | **Hybrid Keyword & Knowledge Base** | Mode `local` / Circuit Breaker | Jawaban deterministik glosarium, SOP, dan proteksi saat AI offline |
 
-### 5. Testing, Code Quality & Dev Tooling
+### 5. IDE, Testing, Code Quality & Dev Tooling
 
-| Kategori | Tool / Package | Versi (`lock` / Constraint) | Peran dalam Sistem |
+| Kategori | Tool / Package | Versi (`lock` / Keterangan) | Peran dalam Sistem |
 |---|---|---|---|
+| AI Agentic IDE | **Google Antigravity** | Desktop IDE | Pengembangan fitur, refactoring UI/UX, debugging, & verifikasi otomatis |
+| Code Editor / IDE | **Visual Studio Code (VS Code)** | Desktop Editor | Penyuntingan kode PHP, Blade, JS, konfigurasi, & manajemen Git |
 | Automated Testing | **PHPUnit** (`phpunit/phpunit`) | `12.5.44` | Menjalankan 48 unit & feature test suite (`php artisan test`) |
 | Code Formatter | **Laravel Pint** (`laravel/pint`) | `v1.32.3` | Standarisasi gaya penulisan kode PHP |
 | Test Helper | **Faker** & **Mockery** | `^1.23` / `^1.6` | Generator data seeder/uji & mocking HTTP/layanan |
