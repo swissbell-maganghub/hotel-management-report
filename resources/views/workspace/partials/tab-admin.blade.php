@@ -174,8 +174,8 @@
                         @php
                             $isSelf = $u->id === $user->id;
                             $sessions = (int) ($u->active_sessions_count ?? 0);
-                            $deptText = $u->role === 'gm'
-                                ? ($isEn ? 'All Departments' : 'Semua Departemen')
+                            $deptText = in_array($u->role, ['gm', 'it_admin'], true)
+                                ? ($isEn ? 'Executive (All Departments)' : 'Executive (Semua Departemen)')
                                 : ($u->department ? $u->department->name.' ('.$u->department->code.')' : '-');
                             $lastLogin = $u->last_login_at
                                 ? $u->last_login_at->copy()->timezone('Asia/Makassar')->format('d M Y, H:i:s').' WITA'

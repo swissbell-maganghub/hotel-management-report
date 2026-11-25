@@ -166,12 +166,24 @@ class WorkspaceController extends Controller
             $activeTab = 'dashboard';
         }
 
+        $operationalDepartments = $departments->reject(fn ($d) => $d->code === 'ANG')->values();
+        $accessibleDepts = ($user->canAccessAllDepartments()
+            ? $operationalDepartments
+            : $operationalDepartments->whereIn('id', $accessibleDeptIds)
+        )->values();
+        $requestedDept = strtoupper(trim((string) $request->query('dept', '')));
+        $activeReportDept = ($activeTab === 'reports' && $accessibleDepts->contains(fn ($d) => $d->code === $requestedDept))
+            ? $requestedDept
+            : '';
+
         return view('workspace.index', [
             'user' => $user,
             'locale' => $locale,
             'activeTab' => $activeTab,
+            'activeReportDept' => $activeReportDept,
             'allowedTabs' => $allowedTabs,
             'departments' => $departments,
+            'accessibleDepts' => $accessibleDepts,
             'templates' => $templates,
             'allTemplates' => $allTemplates,
             'reports' => $reports,

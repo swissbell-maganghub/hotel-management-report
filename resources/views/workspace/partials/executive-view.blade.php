@@ -209,7 +209,7 @@
                         {{ $isEn ? 'Report Verification Distribution' : 'Distribusi Status Verifikasi Laporan' }}
                     </h3>
                     <p class="text-xs text-slate-500">
-                        {{ $isEn ? 'Real-time status across all departments' : 'Proporsi status laporan lintas 8 departemen' }}
+                        {{ $isEn ? 'Real-time status across all 7 operational departments' : 'Proporsi status laporan lintas 7 departemen' }}
                     </p>
                 </div>
                 <span class="text-xs font-mono-num font-bold text-navy bg-slate-100 px-2.5 py-1 rounded-lg">
@@ -246,13 +246,13 @@
         </div>
     </section>
 
-    <!-- Row 3: Compact 8-Department Compliance Table + Room Mix Chart & Results -->
+    <!-- Row 3: Compact 7-Department Compliance Table + Room Mix Chart & Results -->
     <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div class="lg:col-span-7 bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden flex flex-col">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
                 <div>
                     <h3 class="text-sm font-heading font-bold text-navy">
-                        {{ $isEn ? '8-Department Reporting Compliance Matrix' : 'Matriks Kepatuhan Laporan 8 Departemen' }}
+                        {{ $isEn ? '7-Department Reporting Compliance Matrix' : 'Matriks Kepatuhan Laporan 7 Departemen' }}
                     </h3>
                     <p class="text-xs text-slate-500">
                         {{ $isEn ? 'Latest report & update timestamp (Makassar WITA)' : 'Laporan terbaru & waktu pembaruan masing-masing departemen (WITA)' }}

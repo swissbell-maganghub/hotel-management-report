@@ -517,6 +517,11 @@ class HotelManagementReportTest extends TestCase
         $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
         $itAdmin = User::where('email', 'it.admin@swissbel.local')->firstOrFail();
 
+        $this->assertSame(7, Department::count());
+        $this->assertDatabaseMissing('departments', ['code' => 'ANG']);
+        $this->assertNull($gm->department_id);
+        $this->assertNull($itAdmin->department_id);
+
         $this->actingAs($gm)
             ->get('/?tab=dashboard')
             ->assertOk()
@@ -526,10 +531,11 @@ class HotelManagementReportTest extends TestCase
             ->assertSee('WITA')
             ->assertSee('FO • OCCUPANCY', false)
             ->assertSee('F&amp;B • REVENUE', false)
-            ->assertSee('Matriks Kepatuhan Laporan 8 Departemen')
+            ->assertSee('Matriks Kepatuhan Laporan 7 Departemen')
             ->assertSee('Ringkasan Eksekutif Energi &amp; Air (POMEC)', false)
             ->assertSee('Ringkasan Hasil Bisnis &amp; SDM', false)
             ->assertSee('System Topology')
+            ->assertDontSee('Admin &amp; General', false)
             ->assertDontSee('tab-panel-admin')
             ->assertDontSee('tab-panel-audit')
             ->assertDontSee('Kesiapan Infrastruktur &amp; Topologi', false)
@@ -568,10 +574,31 @@ class HotelManagementReportTest extends TestCase
         $this->actingAs($itAdmin)
             ->get('/?tab=reports')
             ->assertOk()
+            ->assertSee('reports-dept-submenu')
+            ->assertSee('sidebar-reports-submenu')
+            ->assertDontSee('data-dept-tab="ANG"', false)
+            ->assertDontSee('data-sidebar-dept="ANG"', false)
             ->assertSee('RPT-ENG-202611-001')
             ->assertSee('RPT-FO-202611-002')
             ->assertSee('RPT-HK-202611-004')
-            ->assertSee('RPT-ANG-202611-008');
+            ->assertDontSee('RPT-ANG-202611-008')
+            ->assertDontSee('Admin &amp; General', false);
+
+        $this->actingAs($itAdmin)
+            ->get('/?tab=admin')
+            ->assertOk()
+            ->assertSee('Executive (Semua Departemen)');
+
+        $this->actingAs($itAdmin)
+            ->get('/?tab=reports&dept=ANG')
+            ->assertOk()
+            ->assertSee('activeReportDept":""', false);
+
+        $this->actingAs($itAdmin)
+            ->get('/?tab=reports&dept=FO')
+            ->assertOk()
+            ->assertSee('activeReportDept":"FO"', false)
+            ->assertSee('Buat Laporan FO');
 
         $this->actingAs($itAdmin)
             ->get('/?tab=pomec')
@@ -585,6 +612,12 @@ class HotelManagementReportTest extends TestCase
             ->assertOk()
             ->assertSee('gm@swissbel.local')
             ->assertSee('hod.eng@swissbel.local');
+
+        $this->actingAs($staffEng)
+            ->get('/?tab=reports')
+            ->assertOk()
+            ->assertDontSee('id="reports-dept-submenu"', false)
+            ->assertDontSee('id="sidebar-reports-submenu"', false);
 
         $this->actingAs($staffEng)
             ->get('/?tab=dashboard')

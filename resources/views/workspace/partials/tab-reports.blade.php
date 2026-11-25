@@ -10,13 +10,89 @@
 @endphp
 
 <div class="space-y-4">
+    @php
+        $accessibleDeptIds = $user->accessibleDepartmentIds();
+        $submenuDepts = ($accessibleDepts ?? $departments->reject(fn ($d) => $d->code === 'ANG')->filter(fn ($d) => $user->canAccessAllDepartments() || in_array($d->id, $accessibleDeptIds, true)))->values();
+        $showDeptFilter = $user->canAccessAllDepartments() || $submenuDepts->count() > 1;
+        $currentDeptCode = $activeReportDept ?? '';
+        $currentDeptObj = $currentDeptCode ? $submenuDepts->firstWhere('code', $currentDeptCode) : null;
+        $initialScopedReports = $currentDeptObj ? $reports->where('department_id', $currentDeptObj->id) : $reports;
+        $initialReviewed = $initialScopedReports->where('status', 'reviewed')->count();
+        $initialActionable = $initialScopedReports->whereIn('status', ['submitted', 'in_review', 'returned'])->count();
+        $fieldCls = 'w-full h-9 px-3 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal';
+    @endphp
+
+    <!-- Organized Department Submenu & Context Header -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-3.5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="space-y-1 min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span id="reports-active-dept-badge" class="px-2 py-0.5 rounded-md bg-navy/8 text-navy font-mono-num text-[10px] font-bold uppercase tracking-wider">
+                        {{ $currentDeptObj ? $currentDeptObj->code : ($showDeptFilter ? ($isEn ? 'ALL DEPTS' : 'SEMUA DEPT') : ($submenuDepts->first()?->code ?? 'DEPT')) }}
+                    </span>
+                    <h2 id="reports-active-dept-title" class="text-base font-heading font-extrabold text-navy truncate">
+                        {{ $currentDeptObj ? $currentDeptObj->localizedName($locale) : ($showDeptFilter ? ($isEn ? 'All Departmental Reports' : 'Semua Laporan Departemen') : ($submenuDepts->first()?->localizedName($locale) ?? ($isEn ? 'Department Reports' : 'Laporan Departemen'))) }}
+                    </h2>
+                </div>
+                <p id="reports-active-dept-subtitle" class="text-xs text-slate-500 truncate">
+                    {{ $currentDeptObj
+                        ? ($currentDeptObj->description ?: ($isEn ? 'Focused report workspace & approval queue for this department.' : 'Ruang laporan, analitik, dan histori khusus departemen ini.'))
+                        : ($showDeptFilter
+                            ? ($isEn ? 'Select a department submenu below to focus on specific operational reports and analytics.' : 'Pilih submenu departemen di bawah agar laporan, grafik, dan histori tersusun per divisi.')
+                            : ($isEn ? 'Department report authoring, workflow review, and archive.' : 'Penyusunan, pemeriksaan, dan arsip laporan departemen Anda.')) }}
+                </p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+                <div id="reports-active-dept-stats" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] font-mono-num">
+                    <span class="text-slate-600"><strong class="text-navy">{{ $initialScopedReports->count() }}</strong> {{ $isEn ? 'total' : 'laporan' }}</span>
+                    <span class="text-slate-300">&bull;</span>
+                    <span class="text-emerald-700"><strong>{{ $initialReviewed }}</strong> reviewed</span>
+                    @if ($initialActionable > 0)
+                        <span class="text-slate-300">&bull;</span>
+                        <span class="text-amber-700 font-semibold"><strong>{{ $initialActionable }}</strong> {{ $isEn ? 'pending' : 'perlu aksi' }}</span>
+                    @endif
+                </div>
+
+                @if ($user->canCreateReports())
+                    <button type="button" id="reports-dept-create-btn" onclick="createReportForActiveDept()"
+                        class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-navy hover:bg-navy-light text-white text-xs font-semibold transition cursor-pointer">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                        <span id="reports-dept-create-label">{{ $currentDeptObj ? (($isEn ? 'New ' : 'Buat Laporan ').$currentDeptObj->code) : ($isEn ? 'Create Report' : 'Buat Laporan') }}</span>
+                    </button>
+                @endif
+            </div>
+        </div>
+
+        @if ($showDeptFilter)
+            <div id="reports-dept-submenu" class="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100" role="tablist" aria-label="{{ $isEn ? 'Department Submenu' : 'Submenu Departemen' }}">
+                <button type="button" data-dept-tab="" onclick="selectReportDepartment('')"
+                    class="report-dept-tab-btn inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer {{ $currentDeptCode === '' ? 'bg-navy text-white border-navy shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-navy' }}">
+                    <span>{{ $isEn ? 'All Departments' : 'Semua Departemen' }}</span>
+                    <span data-dept-tab-count="" class="font-mono-num text-[10px] px-1.5 py-0.5 rounded-full {{ $currentDeptCode === '' ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-600' }}">{{ $reports->count() }}</span>
+                </button>
+
+                @foreach ($submenuDepts as $dept)
+                    @php
+                        $deptReports = $reports->where('department_id', $dept->id);
+                        $deptCount = $deptReports->count();
+                        $deptAlertCount = $deptReports->whereIn('status', ['submitted', 'in_review', 'returned'])->count();
+                        $isDeptActive = $currentDeptCode === $dept->code;
+                    @endphp
+                    <button type="button" data-dept-tab="{{ $dept->code }}" onclick="selectReportDepartment('{{ $dept->code }}')"
+                        class="report-dept-tab-btn inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer {{ $isDeptActive ? 'bg-navy text-white border-navy shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-navy' }}">
+                        <span class="font-mono-num text-[10px] font-bold px-1.5 py-0.5 rounded {{ $isDeptActive ? 'bg-white/15 text-white' : 'bg-white border border-slate-200 text-navy' }}">{{ $dept->code }}</span>
+                        <span>{{ $dept->localizedName($locale) }}</span>
+                        <span data-dept-alert-dot="{{ $dept->code }}" class="{{ $deptAlertCount > 0 ? '' : 'hidden' }} w-1.5 h-1.5 rounded-full bg-amber-500" title="{{ $deptAlertCount }} {{ $isEn ? 'needs attention' : 'perlu tindakan' }}"></span>
+                        <span data-dept-tab-count="{{ $dept->code }}" class="font-mono-num text-[10px] px-1.5 py-0.5 rounded-full {{ $isDeptActive ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-600' }}">{{ $deptCount }}</span>
+                    </button>
+                @endforeach
+            </div>
+        @endif
+    </div>
+
     <!-- Filter & Search Bar (Instant Client-Side Filtering) -->
     <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-3">
-        @php
-            $accessibleDeptIds = $user->accessibleDepartmentIds();
-            $showDeptFilter = $user->canAccessAllDepartments() || count($accessibleDeptIds) > 1;
-            $fieldCls = 'w-full h-9 px-3 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal';
-        @endphp
 
         <!-- Row 1: Search + Dropdown Filters (equal height, no awkward wrapping) -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 {{ $showDeptFilter ? 'lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))]' : 'lg:grid-cols-[minmax(0,2fr)_repeat(2,minmax(0,1fr))]' }}">
@@ -32,10 +108,8 @@
             @if ($showDeptFilter)
                 <select id="report-dept-filter" class="{{ $fieldCls }}" title="{{ $isEn ? 'Department' : 'Departemen' }}">
                     <option value="">{{ $isEn ? 'All Accessible Depts' : 'Semua Departemen' }}</option>
-                    @foreach ($departments as $dept)
-                        @if ($user->canAccessAllDepartments() || in_array($dept->id, $accessibleDeptIds, true))
-                            <option value="{{ $dept->code }}">{{ $dept->localizedName($locale) }} ({{ $dept->code }})</option>
-                        @endif
+                    @foreach ($submenuDepts as $dept)
+                        <option value="{{ $dept->code }}">{{ $dept->localizedName($locale) }} ({{ $dept->code }})</option>
                     @endforeach
                 </select>
             @endif

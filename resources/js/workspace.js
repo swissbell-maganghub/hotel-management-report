@@ -208,7 +208,7 @@ function initWorkspace() {
     let AUDIT_LOGS = boot.auditLogs || [];
     let BACKUP_FILES = boot.backupFiles || [];
 
-    let reportFilterState = { search: '', dept: '', period: '', date: '', status: 'all' };
+    let reportFilterState = { search: '', dept: boot.activeReportDept || '', period: '', date: '', status: 'all' };
     let historyActionFilter = '';
     let adminFilterState = { search: '', role: '', dept: '', status: 'all' };
     let auditModuleFilter = '';
@@ -619,7 +619,10 @@ function initWorkspace() {
         notifDropdown?.classList.toggle('hidden');
     });
 
-    window.switchWorkspaceTab = function (tabKey) {
+    window.switchWorkspaceTab = function (tabKey, { toggleSubmenu = false } = {}) {
+        const currentVisiblePanel = document.querySelector('.workspace-panel:not(.hidden)');
+        const alreadyOnTab = currentVisiblePanel?.id === `tab-panel-${tabKey}`;
+
         document.querySelectorAll('.workspace-panel').forEach((p) => p.classList.add('hidden'));
         document.getElementById(`tab-panel-${tabKey}`)?.classList.remove('hidden');
 
@@ -629,16 +632,40 @@ function initWorkspace() {
                 (active ? 'bg-navy text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100/80 hover:text-navy');
         });
 
+        const submenuEl = document.getElementById('sidebar-reports-submenu');
+        const chevronEl = document.getElementById('sidebar-reports-chevron');
+        const reportsNavBtn = document.querySelector('.workspace-tab-btn[data-tab="reports"]');
+        if (submenuEl) {
+            const isCurrentlyOpen = !submenuEl.classList.contains('hidden');
+            const openSubmenu = tabKey === 'reports'
+                ? ((toggleSubmenu && alreadyOnTab) ? !isCurrentlyOpen : true)
+                : false;
+            submenuEl.classList.toggle('hidden', !openSubmenu);
+            chevronEl?.classList.toggle('rotate-180', openSubmenu);
+            reportsNavBtn?.setAttribute('aria-expanded', openSubmenu ? 'true' : 'false');
+        }
+
         const titleEl = document.getElementById('topbar-page-title');
         if (titleEl && boot.tabLabels?.[tabKey]) {
             titleEl.textContent = boot.tabLabels[tabKey];
         }
 
-        closeMobileSidebar();
+        if (!(alreadyOnTab && toggleSubmenu && tabKey === 'reports' && submenuEl)) {
+            closeMobileSidebar();
+        }
 
         const url = new URL(window.location);
         url.searchParams.set('tab', tabKey);
+        if (tabKey === 'reports' && reportFilterState.dept) {
+            url.searchParams.set('dept', reportFilterState.dept);
+        } else {
+            url.searchParams.delete('dept');
+        }
         window.history.replaceState({}, '', url);
+
+        if (typeof syncReportDepartmentSubmenus === 'function') {
+            syncReportDepartmentSubmenus();
+        }
 
         if (tabKey === 'dashboard' || tabKey === 'executive' || tabKey === 'reports' || tabKey === 'pomec') {
             const shouldAnimateReveal = !revealedChartTabs.has(tabKey);
@@ -717,6 +744,11 @@ function initWorkspace() {
 
         const q = reportFilterState.search.trim().toLowerCase();
         const filtered = REPORTS_DATA.filter((rpt) => reportMatchesFilters(rpt));
+        try {
+            syncReportDepartmentSubmenus();
+        } catch (err) {
+            console.error('Failed to sync department submenus:', err);
+        }
         try {
             renderReportsInsights(filtered);
         } catch (err) {
@@ -914,6 +946,141 @@ function initWorkspace() {
         renderReportHistories();
     };
 
+    function syncReportDepartmentSubmenus() {
+        const activeDept = reportFilterState.dept || '';
+        const depts = Array.isArray(boot.accessibleDepts) ? boot.accessibleDepts : [];
+        const onReportsTab = !document.getElementById('tab-panel-reports')?.classList.contains('hidden');
+
+        const sel = document.getElementById('report-dept-filter');
+        if (sel && sel.value !== activeDept) {
+            sel.value = activeDept;
+        }
+
+        const countsByDept = {};
+        const alertsByDept = {};
+        REPORTS_DATA.forEach((rpt) => {
+            const code = rpt.department?.code;
+            if (!code) return;
+            countsByDept[code] = (countsByDept[code] || 0) + 1;
+            if (['submitted', 'in_review', 'returned'].includes(rpt.status)) {
+                alertsByDept[code] = (alertsByDept[code] || 0) + 1;
+            }
+        });
+
+        document.querySelectorAll('.report-dept-tab-btn').forEach((btn) => {
+            const code = btn.dataset.deptTab || '';
+            const active = code === activeDept;
+            const padCls = code === '' ? 'px-3 gap-2' : 'px-2.5 gap-1.5';
+            btn.className = `report-dept-tab-btn inline-flex items-center ${padCls} py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ` +
+                (active ? 'bg-navy text-white border-navy shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-navy');
+
+            const codeBadge = code ? btn.firstElementChild : null;
+            if (codeBadge && !codeBadge.hasAttribute('data-dept-tab-count')) {
+                codeBadge.className = 'font-mono-num text-[10px] font-bold px-1.5 py-0.5 rounded ' +
+                    (active ? 'bg-white/15 text-white' : 'bg-white border border-slate-200 text-navy');
+            }
+
+            const countSpan = btn.querySelector('[data-dept-tab-count]');
+            if (countSpan) {
+                countSpan.textContent = code === '' ? String(REPORTS_DATA.length) : String(countsByDept[code] || 0);
+                countSpan.className = 'font-mono-num text-[10px] px-1.5 py-0.5 rounded-full ' +
+                    (active ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-600');
+            }
+
+            const dotSpan = btn.querySelector('[data-dept-alert-dot]');
+            if (dotSpan) {
+                const alertCnt = alertsByDept[code] || 0;
+                dotSpan.classList.toggle('hidden', alertCnt === 0);
+                dotSpan.title = `${alertCnt} ${IS_EN ? 'needs attention' : 'perlu tindakan'}`;
+            }
+        });
+
+        document.querySelectorAll('.sidebar-dept-btn').forEach((btn) => {
+            const code = btn.dataset.sidebarDept || '';
+            const active = onReportsTab && code === activeDept;
+            btn.className = 'sidebar-dept-btn w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] transition cursor-pointer ' +
+                (active ? 'bg-navy/10 text-navy font-semibold' : 'font-medium text-slate-500 hover:bg-slate-100/80 hover:text-navy');
+            const cEl = btn.querySelector('[data-sidebar-dept-count]');
+            if (cEl) {
+                cEl.textContent = code === '' ? String(REPORTS_DATA.length) : String(countsByDept[code] || 0);
+            }
+        });
+
+        const scoped = activeDept ? REPORTS_DATA.filter((r) => r.department?.code === activeDept) : REPORTS_DATA;
+        const reviewedCnt = scoped.filter((r) => r.status === 'reviewed').length;
+        const actionableCnt = scoped.filter((r) => ['submitted', 'in_review', 'returned'].includes(r.status)).length;
+        const deptObj = activeDept ? depts.find((d) => d.code === activeDept) : (depts.length === 1 ? depts[0] : null);
+        const multiDept = depts.length > 1;
+
+        const badgeEl = document.getElementById('reports-active-dept-badge');
+        const titleEl = document.getElementById('reports-active-dept-title');
+        const subtitleEl = document.getElementById('reports-active-dept-subtitle');
+        const statsEl = document.getElementById('reports-active-dept-stats');
+
+        if (badgeEl) {
+            badgeEl.textContent = deptObj ? deptObj.code : (IS_EN ? 'ALL DEPTS' : 'SEMUA DEPT');
+        }
+        if (titleEl) {
+            titleEl.textContent = deptObj
+                ? (IS_EN ? (deptObj.name_en || deptObj.name) : deptObj.name)
+                : (IS_EN ? 'All Departmental Reports' : 'Semua Laporan Departemen');
+        }
+        if (subtitleEl) {
+            subtitleEl.textContent = activeDept && deptObj
+                ? (deptObj.description || (IS_EN ? 'Focused report workspace & approval queue for this department.' : 'Ruang laporan, analitik, dan histori khusus departemen ini.'))
+                : (multiDept
+                    ? (IS_EN ? 'Select a department submenu below to focus on specific operational reports and analytics.' : 'Pilih submenu departemen di bawah agar laporan, grafik, dan histori tersusun per divisi.')
+                    : (IS_EN ? 'Department report authoring, workflow review, and archive.' : 'Penyusunan, pemeriksaan, dan arsip laporan departemen Anda.'));
+        }
+        if (statsEl) {
+            const actionPart = actionableCnt > 0
+                ? `<span class="text-slate-300">&bull;</span><span class="text-amber-700 font-semibold"><strong>${actionableCnt}</strong> ${IS_EN ? 'pending' : 'perlu aksi'}</span>`
+                : '';
+            statsEl.innerHTML = `<span class="text-slate-600"><strong class="text-navy">${scoped.length}</strong> ${IS_EN ? 'total' : 'laporan'}</span><span class="text-slate-300">&bull;</span><span class="text-emerald-700"><strong>${reviewedCnt}</strong> reviewed</span>${actionPart}`;
+        }
+
+        const createBtn = document.getElementById('reports-dept-create-btn');
+        const createLbl = document.getElementById('reports-dept-create-label');
+        if (createBtn) {
+            const matchingTpl = activeDept ? TEMPLATES_DATA.find((t) => t.department?.code === activeDept) : TEMPLATES_DATA[0];
+            createBtn.classList.toggle('hidden', !matchingTpl);
+            if (createLbl) {
+                createLbl.textContent = activeDept && matchingTpl
+                    ? `${IS_EN ? 'New ' : 'Buat Laporan '}${activeDept}`
+                    : (IS_EN ? 'Create Report' : 'Buat Laporan');
+            }
+        }
+
+        if (onReportsTab) {
+            const url = new URL(window.location);
+            if (activeDept) {
+                url.searchParams.set('dept', activeDept);
+            } else {
+                url.searchParams.delete('dept');
+            }
+            window.history.replaceState({}, '', url);
+        }
+    }
+
+    window.selectReportDepartment = function (deptCode = '') {
+        reportFilterState.dept = deptCode || '';
+        const panelHidden = document.getElementById('tab-panel-reports')?.classList.contains('hidden');
+        if (panelHidden) {
+            window.switchWorkspaceTab('reports');
+        }
+        closeMobileSidebar();
+        renderReportsTable();
+        renderReportHistories();
+    };
+
+    window.createReportForActiveDept = function () {
+        const activeDept = reportFilterState.dept || '';
+        const tpl = activeDept
+            ? TEMPLATES_DATA.find((t) => t.department?.code === activeDept)
+            : TEMPLATES_DATA[0];
+        window.openReportEditor(null, tpl ? tpl.id : null);
+    };
+
     function setReportDeptFilter(deptCode) {
         const sel = document.getElementById('report-dept-filter');
         if (!sel) return false;
@@ -1098,6 +1265,7 @@ function initWorkspace() {
             const deptMap = new Map();
             base.forEach((r) => {
                 const code = r.department?.code || '-';
+                if (code === '-' || code === 'ANG') return;
                 if (!deptMap.has(code)) deptMap.set(code, { code, name: IS_EN ? (r.department?.name_en || r.department?.name) : r.department?.name, items: [] });
                 deptMap.get(code).items.push(r);
             });
@@ -2357,7 +2525,7 @@ function initWorkspace() {
             {
                 name: (u) => u.name || '',
                 role: (u) => u.role || '',
-                department: (u) => u.role === 'gm' ? 'All' : (u.department?.name || ''),
+                department: (u) => ['gm', 'it_admin'].includes(u.role) ? 'Executive' : (u.department?.name || ''),
                 last_login_at: (u) => u.last_login_at || '',
                 is_active: (u) => u.is_active ? 1 : 0,
             },
@@ -2368,8 +2536,8 @@ function initWorkspace() {
         tbody.innerHTML = pageUsers.map((u) => {
             const initials = escapeHtml((u.name || 'U').slice(0, 2).toUpperCase());
             const isSelf = u.id === CURRENT_USER.id;
-            const deptText = u.role === 'gm'
-                ? (IS_EN ? 'All Departments' : 'Semua Departemen')
+            const deptText = ['gm', 'it_admin'].includes(u.role)
+                ? (IS_EN ? 'Executive (All Departments)' : 'Executive (Semua Departemen)')
                 : (u.department ? `${u.department.name} (${u.department.code})` : '-');
             const lastLogin = u.last_login_at ? formatWita(u.last_login_at, true) : (IS_EN ? 'Never' : 'Belum pernah');
             const sessions = Number(u.active_sessions_count || 0);
@@ -2801,8 +2969,16 @@ function initWorkspace() {
 
     function syncUserPermissionControls() {
         const role = document.getElementById('user-role')?.value || 'staff';
-        const primaryDeptId = String(document.getElementById('user-dept-id')?.value || '');
+        const deptSelect = document.getElementById('user-dept-id');
         const isScopedRole = ['hod', 'staff'].includes(role);
+        if (deptSelect) {
+            if (!isScopedRole) deptSelect.value = '';
+            deptSelect.disabled = !isScopedRole;
+            deptSelect.classList.toggle('bg-slate-100', !isScopedRole);
+            deptSelect.classList.toggle('text-slate-500', !isScopedRole);
+            deptSelect.classList.toggle('cursor-not-allowed', !isScopedRole);
+        }
+        const primaryDeptId = String(deptSelect?.value || '');
 
         document.getElementById('user-readonly-wrap')?.classList.toggle('hidden', !isScopedRole);
         document.getElementById('user-extra-perms-section')?.classList.toggle('hidden', !isScopedRole);

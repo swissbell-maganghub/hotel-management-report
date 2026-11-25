@@ -74,7 +74,7 @@ class DemoDataSeeder extends Seeder
                 'name' => 'Rizky Wijaya',
                 'password' => $password,
                 'role' => User::ROLE_IT_ADMIN,
-                'department_id' => $departments['ANG']->id,
+                'department_id' => null,
                 'is_active' => true,
                 'locale' => 'id',
             ]),
@@ -166,7 +166,7 @@ class DemoDataSeeder extends Seeder
             ]);
         }
 
-        // Ensure all 8 departments have baseline operational demo reports
+        // Ensure all 7 operational departments have baseline demo reports
         $additionalReports = [
             [
                 'report_code' => 'RPT-HK-202611-004',
@@ -237,25 +237,6 @@ class DemoDataSeeder extends Seeder
                 'summary_notes' => 'Prospek MICE pemerintahan dan BUMN meningkat untuk periode Desember 2026.',
                 'created_by' => $users['it_admin']->id,
                 'submitted_at' => now()->subHours(2),
-            ],
-            [
-                'report_code' => 'RPT-ANG-202611-008',
-                'department_id' => $departments['ANG']->id,
-                'report_template_id' => $templates['ANG-OPS']->id,
-                'title' => 'Checklist Operasional Admin & General (IT / Security) — 18 Nov 2026',
-                'period_type' => 'daily',
-                'period_date' => '2026-11-18',
-                'status' => DepartmentReport::STATUS_REVIEWED,
-                'rows_data' => [
-                    ['unit' => 'IT & Network', 'activity' => 'Backup database laporan & cek firewall VPN', 'status' => 'Normal', 'pic' => 'IT Administrator', 'notes' => 'Uptime 99.98%'],
-                    ['unit' => 'Security & Safety', 'activity' => 'Patroli perimeter waterfront & parkir B1-B2', 'status' => 'Normal', 'pic' => 'Chief Security', 'notes' => 'Situasi kondusif'],
-                ],
-                'summary_notes' => 'Sistem jaringan internal hotel dan keamanan area publik berjalan normal.',
-                'created_by' => $users['it_admin']->id,
-                'submitted_at' => now()->subHours(5),
-                'reviewed_by' => $users['hod_eng']->id,
-                'reviewed_at' => now()->subHours(2),
-                'review_note' => 'Checklist harian Admin & General lengkap.',
             ],
         ];
 

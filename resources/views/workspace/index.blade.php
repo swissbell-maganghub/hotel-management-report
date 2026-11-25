@@ -24,6 +24,9 @@
 
     $bootstrapPayload = [
         'locale' => $locale,
+        'activeTab' => $activeTab,
+        'activeReportDept' => $activeReportDept ?? '',
+        'accessibleDepts' => ($accessibleDepts ?? $departments)->values(),
         'tabLabels' => $tabLabels,
         'user' => [
             'id' => $user->id,
@@ -86,8 +89,11 @@
                     @php
                         $isActive = $activeTab === $tabKey;
                     @endphp
-                    <button type="button" data-tab="{{ $tabKey }}" onclick="switchWorkspaceTab('{{ $tabKey }}')"
+                    <button type="button" data-tab="{{ $tabKey }}" onclick="switchWorkspaceTab('{{ $tabKey }}', { toggleSubmenu: true })"
                         title="{{ $tabLabels[$tabKey] }}"
+                        @if ($tabKey === 'reports' && ($accessibleDepts ?? collect())->count() > 1)
+                            aria-expanded="{{ $activeTab === 'reports' ? 'true' : 'false' }}"
+                        @endif
                         class="workspace-tab-btn w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer {{ $isActive ? 'bg-navy text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100/80 hover:text-navy' }}">
                         <span class="flex items-center gap-2.5 min-w-0">
                             @if ($tabKey === 'dashboard')
@@ -110,11 +116,43 @@
                             <span class="sidebar-text truncate">{{ $tabLabels[$tabKey] }}</span>
                         </span>
                         @if ($tabKey === 'reports')
-                            <span id="reports-tab-badge" class="sidebar-text font-mono-num px-1.5 py-0.5 rounded-full text-[10px] bg-crimson text-white leading-none {{ $actionBadgeCount > 0 ? '' : 'hidden' }}">
-                                {{ $actionBadgeCount }}
+                            <span class="sidebar-text inline-flex items-center gap-1.5 shrink-0">
+                                <span id="reports-tab-badge" class="font-mono-num px-1.5 py-0.5 rounded-full text-[10px] bg-crimson text-white leading-none {{ $actionBadgeCount > 0 ? '' : 'hidden' }}">
+                                    {{ $actionBadgeCount }}
+                                </span>
+                                @if (($accessibleDepts ?? collect())->count() > 1)
+                                    <svg id="sidebar-reports-chevron" class="w-3.5 h-3.5 opacity-70 transition-transform duration-150 {{ $activeTab === 'reports' ? 'rotate-180' : '' }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                @endif
                             </span>
                         @endif
                     </button>
+
+                    @if ($tabKey === 'reports' && ($accessibleDepts ?? collect())->count() > 1)
+                        @php $currentSidebarDept = $activeReportDept ?? ''; @endphp
+                        <div id="sidebar-reports-submenu" class="sidebar-text ml-3.5 pl-2.5 border-l border-slate-200/80 space-y-0.5 py-0.5 {{ $activeTab === 'reports' ? '' : 'hidden' }}">
+                            <button type="button" data-sidebar-dept="" onclick="selectReportDepartment('')"
+                                class="sidebar-dept-btn w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition cursor-pointer {{ $activeTab === 'reports' && $currentSidebarDept === '' ? 'bg-navy/10 text-navy' : 'text-slate-500 hover:bg-slate-100/80 hover:text-navy' }}">
+                                <span class="truncate">{{ $isEn ? 'All Departments' : 'Semua Dept' }}</span>
+                                <span data-sidebar-dept-count="" class="font-mono-num text-[10px] opacity-80 shrink-0">{{ $reports->count() }}</span>
+                            </button>
+                            @foreach ($accessibleDepts as $subDept)
+                                @php
+                                    $subCount = $reports->where('department_id', $subDept->id)->count();
+                                    $isSubActive = $activeTab === 'reports' && $currentSidebarDept === $subDept->code;
+                                @endphp
+                                <button type="button" data-sidebar-dept="{{ $subDept->code }}" onclick="selectReportDepartment('{{ $subDept->code }}')"
+                                    class="sidebar-dept-btn w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition cursor-pointer {{ $isSubActive ? 'bg-navy/10 text-navy font-semibold' : 'text-slate-500 hover:bg-slate-100/80 hover:text-navy' }}">
+                                    <span class="flex items-center gap-1.5 min-w-0">
+                                        <span class="font-mono-num text-[9px] font-bold px-1 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">{{ $subDept->code }}</span>
+                                        <span class="truncate">{{ $subDept->localizedName($locale) }}</span>
+                                    </span>
+                                    <span data-sidebar-dept-count="{{ $subDept->code }}" class="font-mono-num text-[10px] opacity-80 shrink-0">{{ $subCount }}</span>
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
                 @endforeach
             </div>
         </div>

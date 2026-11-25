@@ -21,7 +21,7 @@
     {"id": "guide-pomec", "user": "staff.eng@swissbel.local", "question": "bagaimana cara upload data pomec", "expect_source": "Application Guide", "expect_contains": "POMEC"},
     {"id": "guide-history", "user": "gm@swissbel.local", "question": "cara lihat riwayat laporan", "expect_source": "Application Guide"},
     {"id": "guide-escalation", "user": "staff.fo@swissbel.local", "question": "saya ada kendala login hubungi siapa", "expect_source": "Application Guide"},
-    {"id": "departments", "user": "gm@swissbel.local", "question": "ada berapa departemen?", "expect_source": "departments", "expect_contains": "8 departemen"},
+    {"id": "departments", "user": "gm@swissbel.local", "question": "ada berapa departemen?", "expect_source": "departments", "expect_contains": "7 departemen"},
     {"id": "availability", "user": "it.admin@swissbel.local", "question": "tanggal brp aja yang tersedia", "expect_source": "data_availability"},
     {"id": "availability-only18", "user": "it.admin@swissbel.local", "question": "Apakah hanya tanggal 18 yang ada?", "expect_source": "data_availability"},
 
@@ -29,7 +29,7 @@
     {"id": "reports-housekeeping", "user": "gm@swissbel.local", "question": "laporan housekeeping", "expect_source": "department_reports"},
     {"id": "reports-fo-list", "user": "it.admin@swissbel.local", "question": "laporan fo apa saja", "expect_source": "department_reports"},
     {"id": "reports-date17", "user": "it.admin@swissbel.local", "question": "Apakah ada laporan tanggal 17?", "expect_source": "department_reports", "expect_contains": "terbaru"},
-    {"id": "reports-date18", "user": "it.admin@swissbel.local", "question": "laporan tanggal 18 november", "expect_source": "department_reports", "expect_contains": "8 laporan"},
+    {"id": "reports-date18", "user": "it.admin@swissbel.local", "question": "laporan tanggal 18 november", "expect_source": "department_reports", "expect_contains": "7 laporan"},
     {"id": "reports-gm-today", "user": "it.admin@swissbel.local", "question": "brp laporan yang masuk hari ini di gm", "expect_source": ["report_stats", "department_reports"], "expect_not_contains": "Admin & General"},
     {"id": "reports-finance-count", "user": "it.admin@swissbel.local", "question": "brp laporan yang masuk di finance", "expect_source": ["report_stats", "department_reports"], "expect_contains": "1 laporan"},
     {"id": "stats-most-pending", "user": "gm@swissbel.local", "question": "departemen mana yang paling bermasalah?", "expect_source": "report_stats"},
