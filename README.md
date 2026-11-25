@@ -124,67 +124,69 @@ Refer to [DEPLOYMENT.md](DEPLOYMENT.md) for server prerequisites, HTTPS/VLAN sec
 
 ---
 
-## GitHub Collaboration Workflow (Team Best Practices)
+## Panduan Kerja Tim di GitHub (Agar Rapi & Tidak Bentrok)
 
-Agar kolaborasi tim tetap rapi, kode di `main` selalu stabil, dan meminimalkan merge conflict:
+Prinsip utamanya sederhana: branch `main` **harus selalu bersih dan siap jalan**. Jadi saat mengerjakan fitur atau memperbaiki bug, kerjakan di branch terpisah dulu, lalu gabungkan ke `main` lewat **Pull Request (PR)**.
 
-### 1. Konvensi Branch & Commit
+### 1. Aturan Penamaan Branch & Pesan Commit
 
-| Jenis Pekerjaan | Format Nama Branch | Format Pesan Commit | Contoh |
+| Tujuan Kerja | Format Nama Branch | Awalan Pesan Commit | Contoh |
 |---|---|---|---|
-| Fitur baru | `feat/<ringkasan-singkat>` | `feat: ...` | `feat/audit-csv-export` |
-| Perbaikan bug | `fix/<ringkasan-singkat>` | `fix: ...` | `fix/login-theme-default` |
-| UI / Refactor | `refactor/<ringkasan-singkat>` | `refactor: ...` | `refactor/dark-mode-palette` |
-| Dokumentasi | `docs/<ringkasan-singkat>` | `docs: ...` | `docs/update-readme-workflow` |
+| Bikin fitur baru | `feat/<nama-fitur>` | `feat: ...` | `feat/ekspor-audit-csv` |
+| Perbaiki bug / error | `fix/<nama-masalah>` | `fix: ...` | `fix/tombol-darkmode-login` |
+| Rapikan tampilan / kode | `refactor/<bagian>` | `refactor: ...` | `refactor/warna-darkmode` |
+| Update panduan / README | `docs/<bagian>` | `docs: ...` | `docs/panduan-tim-github` |
 
-### 2. Alur Kerja Harian (Anti-Conflict)
+### 2. Urutan Kerja Sehari-hari (5 Langkah)
 
-1. **Selalu mulai dari `main` terbaru** *(jangan coding langsung di branch `main`)*:
+1. **Ambil update terbaru dari `main`, lalu buat branch baru** *(jangan coding langsung di `main`)*:
    ```bash
-   git switch main
+   git checkout main
    git pull origin main
-   git switch -c feat/nama-tugas
+   git checkout -b feat/nama-fitur
    ```
-2. **Kerjakan lingkup kecil & commit bertahap** (`git status` wajib dicek sebelum `git add`):
+2. **Simpan pekerjaan secara bertahap** *(biasakan cek `git status` sebelum `git add`)*:
    ```bash
-   git add <file-yang-relevan>
-   git commit -m "feat: deskripsi perubahan yang jelas"
+   git status
+   git add .
+   git commit -m "feat: jelaskan singkat apa yang baru dibuat"
    ```
-3. **Sinkronkan dengan `main` terbaru sebelum membuka Pull Request (PR)**:
+3. **Gabungkan update terbaru dari teman (`main`) sebelum upload** *(supaya kalau ada kode bentrok, beres di laptop sendiri dulu)*:
    ```bash
    git fetch origin
-   git rebase origin/main
+   git merge origin/main
    ```
-4. **Wajib lolos Quality Gate sebelum push / merge**:
+4. **Pastikan build & tes tetap hijau sebelum upload**:
    ```bash
    npm run build
    php artisan test
    ```
-5. **Push branch fitur & buka Pull Request ke `main`**:
+5. **Upload branch ke GitHub & buat Pull Request (PR)**:
    ```bash
-   git push -u origin feat/nama-tugas
+   git push -u origin feat/nama-fitur
    ```
-   Gunakan **Squash and Merge** atau review minimal 1 rekan tim sebelum masuk ke `main`, lalu hapus branch yang sudah selesai di-merge.
+   Buka GitHub → klik **Compare & pull request** → minta minimal 1 rekan cek → klik **Merge pull request**, lalu hapus branch yang sudah selesai dipakai.
 
-### 3. Aturan Anti-Conflict Khusus Proyek Laravel
+### 3. Hal yang Harus Dihindari Supaya Tidak Saling Timpa Kode
 
-| Area | Aturan Tim |
+| Bagian | Aturan Sederhana |
 |---|---|
-| **Database Migrations** | **Jangan mengubah** file migrasi yang sudah masuk ke `main`. Selalu buat file migrasi baru (`php artisan make:migration ...`). |
-| **File Bersama (*Hot Files*)** | Koordinasikan dengan tim saat mengubah `routes/web.php`, `resources/js/workspace.js`, `resources/css/app.css`, atau `resources/views/workspace/index.blade.php` agar tidak tumpang tindih. |
-| **Environment & Secrets** | **Dilarang** meng-commit `.env`, API key, `database/*.sqlite*`, `public/hot`, `public/build`, `storage/logs/*.log`, `vendor/`, maupun `node_modules/`. |
-| **Lockfiles** | Jika menambah package via `composer require` atau `npm install`, commit juga `composer.lock` / `package-lock.json` agar versi tim seragam. |
+| **File Migration Database** | **Jangan edit** file migration lama yang sudah masuk ke `main`. Kalau mau tambah/ubah tabel, selalu buat file baru (`php artisan make:migration ...`). |
+| **File yang Sering Diedit Bareng** | Kabari tim dulu sebelum ubah `routes/web.php`, `resources/js/workspace.js`, `resources/css/app.css`, atau `resources/views/workspace/index.blade.php` biar tidak edit bagian yang sama bersamaan. |
+| **File Rahasia & File Sementara** | **Jangan pernah upload** `.env`, API key/password, `database/*.sqlite*`, `public/hot`, `public/build`, `storage/logs/*.log`, `vendor/`, atau `node_modules/`. |
+| **Install Package Baru** | Kalau habis jalankan `composer require` atau `npm install`, file `.lock` (`composer.lock` / `package-lock.json`) wajib ikut di-commit supaya versi laptop tim sama semua. |
 
-### 4. Penanganan Jika Terjadi Conflict Saat `rebase` / PR
+### 4. Cara Mengatasi Jika Terjadi Bentrok (*Merge Conflict*)
 
-1. Cek daftar file yang konflik dengan `git status`.
-2. Buka file bertanda `<<<<<<<`, `=======`, `>>>>>>>`, pilih/gabungkan perubahan yang benar, lalu hapus seluruh marker konflik.
-3. Jalankan pengujian (`npm run build` dan `php artisan test`) untuk memastikan kode hasil gabungan berjalan normal.
-4. Lanjutkan proses hingga selesai (atau batalkan dengan aman jika ragu):
+Kalau saat menjalankan `git merge origin/main` muncul peringatan *conflict*, jangan panik:
+
+1. Ketik `git status` untuk melihat file mana saja yang bentrok (biasanya bertanda merah / *both modified*).
+2. Buka file tersebut di **VS Code** atau **Antigravity**, lalu cari tanda `<<<<<<<`, `=======`, dan `>>>>>>>`.
+3. Pilih kode mana yang mau dipakai (kode kamu, kode teman, atau gabungkan keduanya), lalu **hapus semua garis tanda** `<<<<<<<`, `=======`, dan `>>>>>>>`.
+4. Simpan file, jalankan `npm run build` dan `php artisan test`, lalu selesaikan penggabungannya:
    ```bash
-   git add <file-yang-sudah-diperbaiki>
-   git rebase --continue
-   # Jika sudah pernah push branch fitur sebelumnya:
-   git push --force-with-lease
+   git add .
+   git commit -m "fix: selesaikan conflict dengan main"
+   git push
    ```
-   *(Gunakan `git rebase --abort` untuk membatalkan rebase ke kondisi semula; jangan pernah force-push ke branch `main`.)*
+   *(Kalau ragu di tengah jalan dan ingin batal dulu ke kondisi sebelum merge, ketik `git merge --abort`.)*
