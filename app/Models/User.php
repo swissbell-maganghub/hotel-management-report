@@ -225,6 +225,16 @@ class User extends Authenticatable
         return $engId ? $this->canInputDepartment((int) $engId) : false;
     }
 
+    /**
+     * Hapus batch impor POMEC: level review di Engineering (HOD Engineering dan IT Admin).
+     */
+    public function canDeletePomec(): bool
+    {
+        $engId = Department::where('code', 'ENG')->value('id');
+
+        return $engId ? $this->canReviewDepartment((int) $engId) : false;
+    }
+
     public function roleLabel(string $locale = 'id'): string
     {
         return match ($this->role) {

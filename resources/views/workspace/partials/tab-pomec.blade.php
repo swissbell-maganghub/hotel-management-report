@@ -1,13 +1,14 @@
 @php
     $isEn = $locale === 'en';
     $canImportPomec = $user->canModifyPomec();
+    $canDeletePomec = $user->canDeletePomec();
     $pomecTypes = \App\Models\PomecRecord::TYPES;
     $field = 'w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal/25 focus:border-teal';
     $pomecCard = 'bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(15,23,42,0.04)]';
 @endphp
 
 {{-- Isi kartu, grafik, dan tabel dirender oleh workspace.js dari data bulan yang dipilih. --}}
-<div id="pomec-root" class="space-y-5" data-types='@json($pomecTypes)'>
+<div id="pomec-root" class="space-y-5" data-types='@json($pomecTypes)' data-can-delete="{{ $canDeletePomec ? '1' : '0' }}">
     <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="sr-only">{{ $isEn ? 'Utility Usage' : 'Pemakaian Utilitas' }}</h2>
         <div role="group" aria-label="{{ $isEn ? 'Utility' : 'Jenis utilitas' }}" class="flex gap-1 max-w-full overflow-x-auto p-1 rounded-xl bg-slate-100">
@@ -185,6 +186,9 @@
                         <th class="py-3 px-5">{{ $isEn ? 'Utility & month' : 'Jenis & bulan' }}</th>
                         <th class="py-3 px-5 text-right">{{ $isEn ? 'Total' : 'Total' }}</th>
                         <th class="py-3 px-5">{{ $isEn ? 'Uploaded by (WITA)' : 'Diunggah oleh (WITA)' }}</th>
+                        @if ($canDeletePomec)
+                            <th class="py-3 px-5"><span class="sr-only">{{ $isEn ? 'Action' : 'Aksi' }}</span></th>
+                        @endif
                     </tr>
                 </thead>
                 <tbody id="pomec-imports-tbody" class="divide-y divide-slate-100"></tbody>

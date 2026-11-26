@@ -348,7 +348,9 @@ class PomecExcelService
             do {
                 $batchCode = sprintf('POMEC-%s-%s-%02d', $prefix, $monthCompact, $seq);
                 $seq++;
-            } while (PomecImport::where('batch_code', $batchCode)->exists());
+                // Kode batch yang sudah dihapus tidak dipakai ulang, supaya jejak audit tidak rancu.
+            } while (PomecImport::where('batch_code', $batchCode)->exists()
+                || AuditLog::where('event', 'pomec.import.deleted')->where('metadata->batch_code', $batchCode)->exists());
 
             $finalPath = null;
             if (! empty($preview['temp_path']) && Storage::disk('local')->exists($preview['temp_path'])) {
@@ -398,6 +400,37 @@ class PomecExcelService
 
             return $import;
         });
+    }
+
+    /** Menghapus batch beserta barisnya. File asli diarsipkan, tidak dibuang. */
+    public function deleteImport(PomecImport $import, User $user): void
+    {
+        $storedPath = $import->stored_path;
+        $archivePath = $storedPath ? 'pomec/deleted/'.now()->format('YmdHis').'_'.basename($storedPath) : null;
+
+        DB::transaction(function () use ($import, $user, $archivePath): void {
+            AuditLog::record(
+                $user,
+                'pomec.import.deleted',
+                'POMEC',
+                "Impor POMEC {$import->batch_code} ({$import->utility_type} {$import->period_month}) dihapus ({$import->total_rows} baris).",
+                [
+                    'batch_code' => $import->batch_code,
+                    'sha256' => $import->file_hash_sha256,
+                    'original_filename' => $import->original_filename,
+                    'total_usage' => $import->total_usage,
+                    'total_cost' => $import->total_cost,
+                    'archived_path' => $archivePath,
+                ]
+            );
+
+            $import->records()->delete();
+            $import->delete();
+        });
+
+        if ($storedPath && Storage::disk('local')->exists($storedPath)) {
+            Storage::disk('local')->move($storedPath, $archivePath);
+        }
     }
 
     public function exportExcel(string $utilityType, ?string $periodMonth = null): StreamedResponse

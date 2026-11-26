@@ -35,6 +35,7 @@ Route::middleware(['auth', 'active'])->group(function (): void {
     // POMEC Utility Management (Excel Import + SHA-256 Preview + Commit + Export)
     Route::post('/pomec/preview', [PomecController::class, 'preview'])->name('pomec.preview');
     Route::post('/pomec/commit', [PomecController::class, 'commit'])->name('pomec.commit');
+    Route::delete('/pomec/imports/{import}', [PomecController::class, 'destroy'])->name('pomec.imports.destroy');
     Route::get('/pomec/export/{utilityType}/excel', [PomecController::class, 'exportExcel'])->name('pomec.export.excel');
     Route::get('/pomec/export/{utilityType}/pdf', [PomecController::class, 'exportPdf'])->name('pomec.export.pdf');
 

@@ -2342,8 +2342,9 @@ function initWorkspace() {
         if (!tbody) return;
         document.getElementById('pomec-batch-count').textContent = POMEC_IMPORTS.length;
 
+        const canDelete = pomecRoot.dataset.canDelete === '1';
         if (!POMEC_IMPORTS.length) {
-            tbody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-slate-400">${IS_EN ? 'Nothing uploaded yet.' : 'Belum ada file yang diunggah.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="${canDelete ? 5 : 4}" class="py-8 text-center text-slate-400">${IS_EN ? 'Nothing uploaded yet.' : 'Belum ada file yang diunggah.'}</td></tr>`;
             return;
         }
 
@@ -2361,8 +2362,46 @@ function initWorkspace() {
                 <div>${escapeHtml(imp.uploader?.name || '-')}</div>
                 <div class="text-[10px] font-mono-num text-slate-400">${escapeHtml(formatWita(imp.committed_at, true))}</div>
             </td>
+            ${canDelete ? `<td class="py-3 px-5 text-right">
+                <button type="button" data-pomec-delete="${Number(imp.id)}" class="px-3 py-1.5 rounded-xl border border-slate-200 text-crimson-dark hover:bg-rose-50 text-xs font-semibold transition cursor-pointer disabled:opacity-50">${IS_EN ? 'Delete' : 'Hapus'}</button>
+            </td>` : ''}
         </tr>`).join('');
     }
+
+    document.getElementById('pomec-imports-tbody')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-pomec-delete]');
+        if (!btn) return;
+        const id = Number(btn.dataset.pomecDelete);
+        const imp = POMEC_IMPORTS.find((i) => i.id === id);
+        if (!imp) return;
+        const what = `${pomecLabel(imp.utility_type)} ${pomecMonthName(imp.period_month)}`;
+        const question = IS_EN
+            ? `Delete ${what} (${imp.total_rows} rows) from "${imp.original_filename}"?\n\nThese readings disappear from the charts. You can then upload the corrected file.`
+            : `Hapus data ${what} (${imp.total_rows} baris) dari file "${imp.original_filename}"?\n\nData ini hilang dari grafik. Setelah itu file yang benar bisa diunggah lagi.`;
+        if (!window.confirm(question)) return;
+
+        btn.disabled = true;
+        try {
+            const res = await fetch(`/pomec/imports/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRF-TOKEN': CSRF_TOKEN, Accept: 'application/json' },
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                window.showToast(extractErrorMessage(data, T.saveFailed), 'error');
+                btn.disabled = false;
+                return;
+            }
+            POMEC_RECORDS = POMEC_RECORDS.filter((r) => r.pomec_import_id !== id);
+            POMEC_IMPORTS = POMEC_IMPORTS.filter((i) => i.id !== id);
+            renderPomec();
+            renderPomecImports();
+            window.showToast(data.message, 'success');
+        } catch {
+            window.showToast(T.networkError, 'error');
+            btn.disabled = false;
+        }
+    });
 
     document.getElementById('pomec-month-filter')?.addEventListener('change', (e) => {
         pomecMonth = e.target.value;

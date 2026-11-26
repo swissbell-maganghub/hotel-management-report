@@ -294,7 +294,7 @@ class HotelManagementReportTest extends TestCase
                 ->assertJsonPath('preview.valid_count', 0)
                 ->assertJsonPath('preview.error_count', 1);
 
-            @unlink($tmpPath);
+            $tmpPaths[] = $tmpPath;
 
             $this->actingAs($staffEng)->get("/pomec/export/{$type}/excel")->assertOk()->streamedContent();
             $this->actingAs($staffEng)->get("/pomec/export/{$type}/pdf?period_month=2026-10")->assertOk()->assertDownload("pomec_{$type}_2026-10.pdf");
@@ -302,6 +302,37 @@ class HotelManagementReportTest extends TestCase
 
         $this->assertEquals(40, (float) PomecRecord::where('meter_name', 'PLN Laundry')->value('lwbp_value'));
         $this->actingAs($staffEng)->get('/?tab=pomec')->assertOk()->assertSee('PLN Laundry')->assertSee('Gas LPG');
+
+        // Tanggal gas yang lebih baru tidak boleh menggeser grafik Listrik/Air di dashboard GM.
+        $gm = User::where('email', 'gm@swissbel.local')->firstOrFail();
+        PomecRecord::where('utility_type', 'gas')->firstOrFail()->replicate()
+            ->fill(['reading_date' => '2026-12-31', 'transaction_hash' => hash('sha256', 'gas-later')])
+            ->save();
+        $labels = $this->actingAs($gm)->get('/?tab=dashboard')->assertOk()->viewData('gmCharts')['pomec']['labels'];
+        $this->assertNotContains('31 Dec', $labels);
+
+        // Hapus batch: hanya HOD Engineering / IT Admin. $upload masih menunjuk file solar.
+        $hodEng = User::where('email', 'hod.eng@swissbel.local')->firstOrFail();
+        $solar = PomecImport::where('utility_type', 'solar')->firstOrFail();
+        $this->actingAs($staffEng)->deleteJson("/pomec/imports/{$solar->id}")->assertForbidden();
+        $this->actingAs($gm)->deleteJson("/pomec/imports/{$solar->id}")->assertForbidden();
+        Storage::disk('local')->assertExists($solar->stored_path);
+
+        $this->actingAs($hodEng)->deleteJson("/pomec/imports/{$solar->id}")->assertOk();
+        $this->assertModelMissing($solar);
+        $this->assertSame(0, PomecRecord::where('pomec_import_id', $solar->id)->count());
+        $this->assertDatabaseHas('audit_logs', ['event' => 'pomec.import.deleted', 'user_id' => $hodEng->id]);
+        Storage::disk('local')->assertMissing($solar->stored_path);
+        $this->assertCount(1, Storage::disk('local')->files('pomec/deleted'));
+
+        // Setelah dihapus, file yang sama bisa diunggah lagi dengan kode batch baru.
+        $again = $this->actingAs($staffEng)->post('/pomec/preview', $upload())
+            ->assertOk()
+            ->assertJsonPath('preview.is_duplicate_file', false)
+            ->assertJsonPath('preview.valid_count', 1);
+        $this->actingAs($staffEng)->postJson('/pomec/commit', ['preview_token' => $again->json('preview_token')])->assertStatus(201);
+        $this->assertNotSame($solar->batch_code, PomecImport::where('utility_type', 'solar')->firstOrFail()->batch_code);
+        array_map('unlink', $tmpPaths);
 
         // Test temp cleanup artisan command
         Storage::disk('local')->put('pomec/tmp/fresh.xlsx', 'ok');

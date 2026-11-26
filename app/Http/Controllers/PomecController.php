@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\PomecImport;
 use App\Models\PomecRecord;
 use App\Models\User;
 use App\Services\PomecExcelService;
@@ -63,16 +64,33 @@ class PomecController extends Controller
             session()->forget($sessionKey);
 
             // Kode batch tetap tercatat di riwayat & audit log; popup cukup bahasa sehari-hari.
-            $utility = PomecRecord::TYPES[$import->utility_type]['id'];
-            $month = Carbon::parse("{$import->period_month}-01")->locale('id')->translatedFormat('F Y');
-
             return response()->json([
-                'message' => "{$import->total_rows} data {$utility} {$month} tersimpan.",
+                'message' => "{$import->total_rows} data {$this->describe($import)} tersimpan.",
                 'import' => $import->load(['uploader', 'records']),
             ], 201);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
+    }
+
+    public function destroy(Request $request, PomecImport $import, PomecExcelService $service): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user()->load('extraPermissions');
+        abort_unless($user->canDeletePomec(), 403);
+
+        $message = "{$import->total_rows} data {$this->describe($import)} dihapus.";
+        $service->deleteImport($import, $user);
+
+        return response()->json(['message' => $message]);
+    }
+
+    /** Contoh: "Listrik Oktober 2026". */
+    private function describe(PomecImport $import): string
+    {
+        $month = Carbon::parse("{$import->period_month}-01")->locale('id')->translatedFormat('F Y');
+
+        return PomecRecord::TYPES[$import->utility_type]['id'].' '.$month;
     }
 
     public function exportExcel(Request $request, string $utilityType, PomecExcelService $service): StreamedResponse
