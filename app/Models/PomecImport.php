@@ -17,6 +17,7 @@ class PomecImport extends Model
         'stored_path',
         'total_rows',
         'total_usage',
+        'total_cost',
         'status',
         'uploaded_by',
         'committed_at',
@@ -26,6 +27,7 @@ class PomecImport extends Model
     {
         return [
             'total_usage' => 'decimal:2',
+            'total_cost' => 'decimal:2',
             'committed_at' => 'datetime',
         ];
     }

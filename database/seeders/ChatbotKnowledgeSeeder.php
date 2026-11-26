@@ -39,8 +39,8 @@ class ChatbotKnowledgeSeeder extends Seeder
             [
                 'slug' => 'guide-pomec-upload', 'type' => 'guide', 'priority' => 10, 'title' => 'Cara unggah laporan POMEC',
                 'triggers' => self::HOW.'|unggah|upload|impor|import + pomec|listrik|air|water|utilit|excel|meter',
-                'body_id' => "Langkah mengunggah laporan POMEC:\n1. Buka tab POMEC Utility.\n2. Unduh template Excel contoh jika perlu (Listrik LWBP/WBP atau Air m³).\n3. Unggah file .xlsx untuk masuk ke tahap Preview & Cek Duplikasi SHA-256.\n4. Pastikan semua baris berstatus Valid, lalu klik Simpan Data Valid ke Database.",
-                'body_en' => "Steps to import a POMEC Excel report:\n1. Open the POMEC Utility tab.\n2. Download the sample Excel template if needed (Electricity LWBP/WBP or Water m³).\n3. Upload your .xlsx file to enter Preview & SHA-256 Deduplication.\n4. Verify all rows show Valid, then click Commit Valid Rows to Database.",
+                'body_id' => "Langkah mengunggah laporan POMEC:\n1. Buka tab POMEC Utility.\n2. Pilih jenis utilitas (Listrik, Air, Gas LPG, atau Solar) dan bulan periodenya.\n3. Unggah file Excel bulanan asli (.xlsx/.xls) untuk masuk ke tahap Preview & Cek Duplikasi SHA-256.\n4. Pastikan semua baris berstatus Valid, lalu klik Simpan Data Valid ke Database.",
+                'body_en' => "Steps to import a POMEC Excel report:\n1. Open the POMEC Utility tab.\n2. Choose the utility (Electricity, Water, LPG Gas, or Diesel) and the period month.\n3. Upload the original monthly Excel file (.xlsx/.xls) to enter Preview & SHA-256 Deduplication.\n4. Verify all rows show Valid, then click Commit Valid Rows to Database.",
             ],
             [
                 'slug' => 'guide-escalation', 'type' => 'guide', 'priority' => 5, 'title' => 'Eskalasi ke HOD / IT',
@@ -87,8 +87,8 @@ class ChatbotKnowledgeSeeder extends Seeder
                 '**LWBP** (Luar Waktu Beban Puncak): pemakaian listrik di luar jam beban puncak; dikenakan tarif lebih rendah. Pasangannya **WBP** (Waktu Beban Puncak): pemakaian pada jam beban puncak, umumnya pukul 17.00–22.00 sesuai ketentuan PLN, dengan tarif lebih tinggi. Keduanya dicatat per meter pada modul POMEC Utility.',
                 '**LWBP** (Luar Waktu Beban Puncak): off-peak electricity usage, billed at the lower tariff. Its counterpart **WBP** (Waktu Beban Puncak) is peak-hour usage, typically 17:00–22:00 under PLN tariffs, billed higher. Both are recorded per meter in the POMEC Utility module.'),
             $g('pomec', 'POMEC', ['pomec'],
-                '**POMEC** adalah modul utilitas pada sistem ini untuk mencatat pembacaan meter **listrik** (LWBP/WBP, kWh) dan **air** (m³), diimpor dari file Excel dengan pengecekan duplikasi.',
-                "**POMEC** is this system's utility module for recording **electricity** (LWBP/WBP, kWh) and **water** (m³) meter readings, imported from Excel with duplicate checks."),
+                '**POMEC** adalah modul utilitas pada sistem ini untuk mencatat pembacaan meter **listrik** (LWBP/WBP, kWh), **air** (m³), **gas LPG** (tabung), dan **solar genset** (liter), diimpor dari file Excel dengan pengecekan duplikasi.',
+                "**POMEC** is this system's utility module for recording **electricity** (LWBP/WBP, kWh), **water** (m³), **LPG gas** (cylinders), and **genset diesel** (litres), imported from Excel with duplicate checks."),
             $g('gm', 'GM (General Manager)', ['gm', 'general manager'],
                 '**GM** (General Manager) adalah pimpinan tertinggi operasional hotel. Pada sistem ini GM dapat melihat ringkasan laporan **seluruh departemen** dan ringkasan System Topology secara read-only. GM adalah jabatan, bukan departemen.',
                 "**GM** (General Manager) is the hotel's top operational executive. In this system the GM sees report summaries for **all departments** and a read-only System Topology summary. GM is a role, not a department."),

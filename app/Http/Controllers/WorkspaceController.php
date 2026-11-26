@@ -62,8 +62,13 @@ class WorkspaceController extends Controller
         $pomecImports = $canPomec
             ? PomecImport::with('uploader')->latest('committed_at')->get()
             : collect();
-        $pomecRecords = $canPomec
-            ? PomecRecord::with('import')->latest('reading_date')->limit(50)->get()
+        // Bulan harus utuh karena total per bulan dihitung di browser.
+        // ponytail: 13 bulan terakhir (~3.000 baris); ringkas di server kalau datanya membengkak.
+        $latestPomecDate = $canPomec ? PomecRecord::max('reading_date') : null;
+        $pomecRecords = $latestPomecDate
+            ? PomecRecord::whereDate('reading_date', '>=', Carbon::parse($latestPomecDate)->subMonthsNoOverflow(12)->startOfMonth()->toDateString())
+                ->latest('reading_date')
+                ->get()
             : collect();
 
         $electricityTotal = $canPomec

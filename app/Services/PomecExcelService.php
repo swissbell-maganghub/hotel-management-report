@@ -7,138 +7,108 @@ use App\Models\PomecImport;
 use App\Models\PomecRecord;
 use App\Models\User;
 use App\Support\ExcelCell;
-use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Exception;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
+/**
+ * Membaca file bulanan asli POMEC apa adanya. Nama sheet dan posisi kolom mengikuti file
+ * yang dipakai tim engineering; kalau tata letak file berubah, ubah pembaca di bawah.
+ */
 class PomecExcelService
 {
+    private const MONTHS = [
+        'jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'may' => 5, 'mei' => 5, 'jun' => 6, 'jul' => 7,
+        'aug' => 8, 'agu' => 8, 'sep' => 9, 'oct' => 10, 'okt' => 10, 'nov' => 11, 'dec' => 12, 'des' => 12,
+    ];
+
     public function parseForPreview(UploadedFile $file, string $utilityType, string $periodMonth): array
     {
         $realPath = $file->getRealPath();
         $fileHash = hash_file('sha256', $realPath);
         $duplicateImport = PomecImport::where('file_hash_sha256', $fileHash)->first();
 
-        $spreadsheet = IOFactory::load($realPath);
-        $sheet = $spreadsheet->getActiveSheet();
-        $rawRows = $sheet->toArray(null, true, true, false);
+        $rawRows = [];
+        $errors = [];
 
-        if (count($rawRows) < 2) {
-            return [
-                'file_hash' => $fileHash,
-                'is_duplicate_file' => (bool) $duplicateImport,
-                'duplicate_batch' => $duplicateImport?->batch_code,
-                'rows' => [],
-                'valid_count' => 0,
-                'error_count' => 1,
-                'duplicate_row_count' => 0,
-                'total_usage' => 0,
-                'errors' => ['File Excel kosong atau tidak memiliki baris data setelah header.'],
-            ];
+        try {
+            $workbook = IOFactory::load($realPath);
+            $rawRows = match ($utilityType) {
+                'electricity' => $this->readElectricity($workbook, $periodMonth),
+                'water' => $this->readWater($workbook, $periodMonth),
+                'gas' => $this->readGas($workbook, $periodMonth),
+                'solar' => $this->readSolar($workbook, $periodMonth),
+            };
+            if (! $rawRows) {
+                $errors[] = "Tidak ada data untuk periode {$periodMonth}. Pastikan bulan yang dipilih sesuai isi file.";
+            }
+        } catch (Exception $e) {
+            $errors[] = 'File Excel tidak dapat dibaca.';
+        } catch (\RuntimeException $e) {
+            $errors[] = $e->getMessage();
         }
 
-        $header = array_map(fn ($v) => strtolower(trim((string) $v)), $rawRows[0]);
+        $hasCost = PomecRecord::TYPES[$utilityType]['cost'];
         $rows = [];
-        $errors = [];
+        $seen = [];
         $validCount = 0;
-        $errorCount = 0;
         $duplicateRowCount = 0;
         $totalUsage = 0.0;
+        $totalCost = 0.0;
 
-        for ($i = 1; $i < count($rawRows); $i++) {
-            $row = $rawRows[$i];
-            if (empty(array_filter($row, fn ($v) => $v !== null && trim((string) $v) !== ''))) {
-                continue;
-            }
-
-            $lineNum = $i + 1;
-            $rawDate = trim((string) ($row[0] ?? ''));
-            $meterName = trim((string) ($row[1] ?? ''));
-
-            try {
-                $parsedDate = is_numeric($rawDate)
-                    ? Carbon::instance(Date::excelToDateTimeObject((float) $rawDate))->format('Y-m-d')
-                    : Carbon::parse($rawDate)->format('Y-m-d');
-            } catch (\Throwable) {
-                $parsedDate = null;
-            }
-
+        foreach ($rawRows as $row) {
             $rowErrors = [];
-            if (! $parsedDate) {
-                $rowErrors[] = 'Tanggal tidak valid';
+            if ($row['usage'] === null) {
+                $rowErrors[] = 'Pemakaian bukan angka (cek rumus di Excel)';
+            } elseif (min($row['usage'], $row['lwbp'] ?? 0, $row['wbp'] ?? 0) < 0) {
+                $rowErrors[] = 'Pemakaian negatif (cek angka meter atau pengisian stok)';
             }
-            if ($meterName === '') {
-                $rowErrors[] = 'Nama meter kosong';
-            }
-
-            $lwbp = null;
-            $wbp = null;
-            $waterM3 = null;
-            $notes = '';
-            $usage = 0.0;
-
-            if ($utilityType === 'electricity') {
-                $lwbp = $this->parseNumeric($row[2] ?? null);
-                $wbp = $this->parseNumeric($row[3] ?? null);
-                $notes = trim((string) ($row[4] ?? ''));
-
-                if ($lwbp === null || $lwbp < 0) {
-                    $rowErrors[] = 'LWBP harus angka >= 0';
-                }
-                if ($wbp === null || $wbp < 0) {
-                    $rowErrors[] = 'WBP harus angka >= 0';
-                }
-                if ($lwbp !== null && $wbp !== null) {
-                    $usage = round($lwbp + $wbp, 2);
-                }
-            } else {
-                $waterM3 = $this->parseNumeric($row[2] ?? null);
-                $notes = trim((string) ($row[3] ?? ''));
-
-                if ($waterM3 === null || $waterM3 < 0) {
-                    $rowErrors[] = 'Pemakaian air (m³) harus angka >= 0';
-                } else {
-                    $usage = round($waterM3, 2);
-                }
+            if ($hasCost && $row['cost'] === null) {
+                $rowErrors[] = 'Biaya bukan angka (cek rumus di Excel)';
             }
 
-            $txHash = $parsedDate && $meterName !== ''
-                ? hash('sha256', "{$utilityType}|{$parsedDate}|{$meterName}|{$usage}")
-                : null;
-
-            $isDuplicateRow = $txHash ? PomecRecord::where('transaction_hash', $txHash)->exists() : false;
+            // Identitas baris tanpa angka pemakaian: file revisi tidak boleh terhitung dua kali.
+            $txHash = hash('sha256', "{$utilityType}|{$row['date']}|{$row['meter']}");
+            $isDuplicateRow = PomecRecord::where('utility_type', $utilityType)
+                ->whereDate('reading_date', $row['date'])
+                ->where('meter_name', $row['meter'])
+                ->exists();
             if ($isDuplicateRow) {
                 $duplicateRowCount++;
                 $rowErrors[] = 'Transaksi duplikat sudah ada di database';
             }
+            if (isset($seen[$txHash])) {
+                $rowErrors[] = 'Tanggal ganda di dalam file';
+            }
+            $seen[$txHash] = true;
 
             $status = empty($rowErrors) ? 'valid' : ($isDuplicateRow && count($rowErrors) === 1 ? 'duplicate' : 'error');
             if ($status === 'valid') {
                 $validCount++;
-                $totalUsage += $usage;
+                $totalUsage += $row['usage'];
+                $totalCost += $row['cost'] ?? 0;
             } else {
-                $errorCount++;
-                $errors[] = "Baris {$lineNum}: ".implode(', ', $rowErrors);
+                $errors[] = "{$row['meter']} {$row['date']}: ".implode(', ', $rowErrors);
             }
 
             $rows[] = [
-                'line' => $lineNum,
-                'reading_date' => $parsedDate ?? $rawDate,
-                'meter_name' => $meterName,
-                'lwbp_value' => $lwbp,
-                'wbp_value' => $wbp,
-                'water_m3' => $waterM3,
-                'total_usage' => $usage,
+                'reading_date' => $row['date'],
+                'meter_name' => $row['meter'],
+                'lwbp_value' => $row['lwbp'] ?? null,
+                'wbp_value' => $row['wbp'] ?? null,
+                'water_m3' => $utilityType === 'water' ? $row['usage'] : null,
+                'total_usage' => $row['usage'] ?? 0,
+                'cost' => $row['cost'] ?? null,
                 'transaction_hash' => $txHash,
-                'notes' => $notes,
+                'notes' => mb_substr($row['notes'] ?? '', 0, 255),
                 'status' => $status,
                 'errors' => $rowErrors,
             ];
@@ -154,16 +124,205 @@ class PomecExcelService
             'file_hash' => $fileHash,
             'utility_type' => $utilityType,
             'period_month' => $periodMonth,
-            'header' => $header,
             'is_duplicate_file' => (bool) $duplicateImport,
             'duplicate_batch' => $duplicateImport?->batch_code,
             'rows' => $rows,
             'valid_count' => $validCount,
-            'error_count' => $errorCount,
+            'error_count' => $rows ? count($rows) - $validCount : count($errors),
             'duplicate_row_count' => $duplicateRowCount,
             'total_usage' => round($totalUsage, 2),
+            'total_cost' => $hasCost ? round($totalCost, 2) : null,
             'errors' => $errors,
         ];
+    }
+
+    private function readElectricity(Spreadsheet $workbook, string $period): array
+    {
+        $rows = [];
+        // Urutan kolom LWBP/WBP di sheet Laundry terbalik dibanding sheet Gedung.
+        foreach ([
+            ['Electric consumtion Gedung', 'PLN Gedung', 'D', 'H'],
+            ['Electric consumtion Laundry', 'PLN Laundry', 'H', 'D'],
+        ] as [$sheetName, $meter, $lwbpCol, $wbpCol]) {
+            $sheet = $this->sheet($workbook, $sheetName);
+            for ($r = 7; $r <= $sheet->getHighestDataRow(); $r++) {
+                $date = $this->date($sheet, "A{$r}", $period);
+                // Angka meter awal/akhir yang masih kosong = hari belum lengkap.
+                if (! $date || $this->anyUnread($sheet, ["B{$r}", "C{$r}", "F{$r}", "G{$r}"])) {
+                    continue;
+                }
+                $lwbp = $this->number($sheet, $lwbpCol.$r);
+                $wbp = $this->number($sheet, $wbpCol.$r);
+                $rows[] = [
+                    'date' => $date,
+                    'meter' => $meter,
+                    'lwbp' => $lwbp,
+                    'wbp' => $wbp,
+                    'usage' => $lwbp === null || $wbp === null ? null : round($lwbp + $wbp, 2),
+                    'cost' => $this->number($sheet, "J{$r}"),
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    private function readWater(Spreadsheet $workbook, string $period): array
+    {
+        $rows = [];
+        foreach (['Pemakaian air gedung' => 'PDAM Gedung', 'Pemakaian air Laundry' => 'PDAM Laundry'] as $sheetName => $meter) {
+            $sheet = $this->sheet($workbook, $sheetName);
+            for ($r = 5; $r <= $sheet->getHighestDataRow(); $r++) {
+                $date = $this->date($sheet, "B{$r}", $period);
+                if (! $date || $this->anyUnread($sheet, ["C{$r}", "D{$r}"])) {
+                    continue;
+                }
+                $rows[] = ['date' => $date, 'meter' => $meter, 'usage' => $this->number($sheet, "E{$r}"), 'cost' => $this->number($sheet, "F{$r}")];
+            }
+        }
+
+        $tank = $this->sheet($workbook, 'Tangki');
+        for ($r = 4; $r <= $tank->getHighestDataRow(); $r++) {
+            $date = $this->date($tank, "B{$r}", $period);
+            // Jumlah tangki kosong = belum diisi; angka 0 tetap dicatat.
+            if (! $date || $this->isEmpty($this->value($tank, "C{$r}"))) {
+                continue;
+            }
+            $rows[] = ['date' => $date, 'meter' => 'Air Tangki', 'usage' => $this->number($tank, "D{$r}"), 'cost' => $this->number($tank, "E{$r}")];
+        }
+
+        return $rows;
+    }
+
+    private function readGas(Spreadsheet $workbook, string $period): array
+    {
+        $sheet = $this->sheet($workbook, 'Sheet1');
+        $title = (string) $this->value($sheet, 'A3');
+
+        if (! preg_match('/MONTH\s*:\s*([a-z]{3})[a-z]*\s+(\d{4})/i', $title, $m) || ! isset(self::MONTHS[strtolower($m[1])])) {
+            throw new \RuntimeException('Judul bulan di sel A3 tidak ditemukan. Pastikan file sesuai jenis utilitas yang dipilih.');
+        }
+        $fileMonth = sprintf('%s-%02d', $m[2], self::MONTHS[strtolower($m[1])]);
+        if ($fileMonth !== $period) {
+            throw new \RuntimeException("File gas ini untuk periode {$fileMonth}, bukan {$period}.");
+        }
+
+        $days = [];
+        // Dua blok berdampingan: kolom hari, jam, jumlah tabung terpasang, pemakaian, catatan.
+        foreach ([['A', 'B', 'F', 'J', 'K'], ['M', 'N', 'R', 'V', 'W']] as [$dayCol, $timeCol, $installedCol, $usageCol, $noteCol]) {
+            $day = null;
+            for ($r = 6; $r <= $sheet->getHighestDataRow(); $r++) {
+                $day = $this->number($sheet, $dayCol.$r) ?? $day;
+                $usage = $this->value($sheet, $usageCol.$r);
+                // Baris tanpa jam adalah baris total; baris tanpa isian adalah shift yang belum diisi.
+                if ($day === null || ! checkdate(self::MONTHS[strtolower($m[1])], (int) $day, (int) $m[2])
+                    || $this->isEmpty($this->value($sheet, $timeCol.$r))
+                    || ($this->isEmpty($this->value($sheet, $installedCol.$r)) && $this->isEmpty($usage))) {
+                    continue;
+                }
+
+                $date = sprintf('%s-%02d', $period, $day);
+                $days[$date] ??= ['date' => $date, 'meter' => 'Gas LPG Dapur', 'usage' => 0.0, 'notes' => ''];
+
+                if (! $this->isEmpty($usage)) {
+                    $days[$date]['usage'] = is_numeric($usage) && $days[$date]['usage'] !== null
+                        ? $days[$date]['usage'] + (float) $usage
+                        : null;
+                }
+                $note = trim((string) $this->value($sheet, $noteCol.$r));
+                if ($note !== '') {
+                    $days[$date]['notes'] = ltrim($days[$date]['notes'].'; '.$note, '; ');
+                }
+            }
+        }
+
+        return array_values($days);
+    }
+
+    private function readSolar(Spreadsheet $workbook, string $period): array
+    {
+        $sheet = $this->sheet($workbook, 'SOLAR');
+        $rows = [];
+
+        for ($r = 5; $r <= $sheet->getHighestDataRow(); $r++) {
+            $date = $this->date($sheet, "B{$r}", $period);
+            $next = $r + 1;
+            // Pemakaian = stok hari ini - stok besok, jadi stok besok harus sudah diisi
+            // (kecuali baris terakhir tabel).
+            if (! $date || ! $this->hasStock($sheet, $r)
+                || ($this->number($sheet, "B{$next}") !== null && ! $this->hasStock($sheet, $next))) {
+                continue;
+            }
+            $stock = (float) $this->number($sheet, "C{$r}") + (float) $this->number($sheet, "D{$r}");
+            $remark = trim((string) $this->value($sheet, "H{$r}"));
+            $rows[] = [
+                'date' => $date,
+                'meter' => 'Solar Genset',
+                'usage' => $this->number($sheet, "F{$r}"),
+                'notes' => "Stok {$stock} L".($remark !== '' ? "; {$remark}" : ''),
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function sheet(Spreadsheet $workbook, string $name): Worksheet
+    {
+        return $workbook->getSheetByName($name)
+            ?? throw new \RuntimeException("Sheet \"{$name}\" tidak ditemukan. Pastikan file sesuai jenis utilitas yang dipilih.");
+    }
+
+    private function value(Worksheet $sheet, string $ref): mixed
+    {
+        $cell = $sheet->getCell($ref);
+
+        try {
+            return $cell->getCalculatedValue();
+        } catch (\PhpOffice\PhpSpreadsheet\Calculation\Exception) {
+            return $cell->getOldCalculatedValue(); // rumus yang tidak bisa dihitung ulang
+        }
+    }
+
+    private function number(Worksheet $sheet, string $ref): ?float
+    {
+        $value = $this->value($sheet, $ref);
+
+        return is_numeric($value) ? round((float) $value, 2) : null;
+    }
+
+    /** Tanggal sel (serial Excel) bila berada di periode yang dipilih. */
+    private function date(Worksheet $sheet, string $ref, string $period): ?string
+    {
+        $value = $this->value($sheet, $ref);
+        if (! is_numeric($value) || $value <= 0) {
+            return null;
+        }
+        $date = Date::excelToDateTimeObject((float) $value)->format('Y-m-d');
+
+        return str_starts_with($date, $period.'-') ? $date : null;
+    }
+
+    private function isEmpty(mixed $value): bool
+    {
+        return $value === null || trim((string) $value) === '';
+    }
+
+    /** Rumus yang menunjuk sel meter kosong menghasilkan 0. */
+    private function anyUnread(Worksheet $sheet, array $refs): bool
+    {
+        foreach ($refs as $ref) {
+            $value = $this->value($sheet, $ref);
+            if ($this->isEmpty($value) || (is_numeric($value) && (float) $value === 0.0)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasStock(Worksheet $sheet, int $row): bool
+    {
+        return ! $this->isEmpty($this->value($sheet, "C{$row}")) || ! $this->isEmpty($this->value($sheet, "D{$row}"));
     }
 
     public function commitPreview(array $preview, User $user): PomecImport
@@ -178,7 +337,7 @@ class PomecExcelService
         }
 
         return DB::transaction(function () use ($preview, $validRows, $user): PomecImport {
-            $prefix = $preview['utility_type'] === 'electricity' ? 'ELC' : 'WTR';
+            $prefix = PomecRecord::TYPES[$preview['utility_type']]['prefix'];
             $monthCompact = str_replace('-', '', $preview['period_month']);
             $latestBatch = PomecImport::where('batch_code', 'like', "POMEC-{$prefix}-{$monthCompact}-%")
                 ->lockForUpdate()
@@ -207,6 +366,7 @@ class PomecExcelService
                 'stored_path' => $finalPath,
                 'total_rows' => count($validRows),
                 'total_usage' => $preview['total_usage'],
+                'total_cost' => $preview['total_cost'],
                 'status' => 'committed',
                 'uploaded_by' => $user->id,
                 'committed_at' => now(),
@@ -222,6 +382,7 @@ class PomecExcelService
                     'wbp_value' => $row['wbp_value'],
                     'water_m3' => $row['water_m3'],
                     'total_usage' => $row['total_usage'],
+                    'cost' => $row['cost'],
                     'transaction_hash' => $row['transaction_hash'],
                     'notes' => $row['notes'],
                 ]);
@@ -239,62 +400,19 @@ class PomecExcelService
         });
     }
 
-    public function downloadSampleTemplate(string $utilityType): StreamedResponse
-    {
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-
-        if ($utilityType === 'electricity') {
-            $sheet->setTitle('POMEC Electricity');
-            $headers = ['Tanggal (YYYY-MM-DD)', 'Nama Meter / Panel', 'LWBP (kWh)', 'WBP (kWh)', 'Catatan'];
-            $samples = [
-                ['2026-11-19', 'Main Panel MDP-01', 1945, 515, 'Shift pagi-malam normal'],
-                ['2026-11-20', 'Main Panel MDP-01', 2010, 530, 'Event ballroom'],
-            ];
-            $filename = 'template_pomec_electricity.xlsx';
-        } else {
-            $sheet->setTitle('POMEC Water');
-            $headers = ['Tanggal (YYYY-MM-DD)', 'Nama Meter', 'Pemakaian Air (m3)', 'Catatan'];
-            $samples = [
-                ['2026-11-19', 'PDAM Main Meter', 89.5, 'Normal'],
-                ['2026-11-20', 'PDAM Main Meter', 94.0, 'Laundry peak'],
-            ];
-            $filename = 'template_pomec_water.xlsx';
-        }
-
-        $sheet->fromArray($headers, null, 'A1');
-        $sheet->fromArray($samples, null, 'A2');
-
-        $lastCol = $utilityType === 'electricity' ? 'E' : 'D';
-        $sheet->getStyle("A1:{$lastCol}1")->applyFromArray([
-            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0F2942']],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-
-        foreach (range('A', $lastCol) as $col) {
-            $sheet->getColumnDimension($col)->setAutoSize(true);
-        }
-
-        return response()->streamDownload(function () use ($spreadsheet): void {
-            $writer = new Xlsx($spreadsheet);
-            $writer->save('php://output');
-        }, $filename, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
-    }
-
     public function exportExcel(string $utilityType, ?string $periodMonth = null): StreamedResponse
     {
         $query = PomecRecord::with('import.uploader')
             ->where('utility_type', $utilityType)
-            ->orderBy('reading_date');
+            ->orderBy('reading_date')
+            ->orderBy('meter_name');
 
         if ($periodMonth) {
             $query->whereHas('import', fn ($q) => $q->where('period_month', $periodMonth));
         }
 
-        $records = $query->get();
+        $type = PomecRecord::TYPES[$utilityType];
+        $isElec = $utilityType === 'electricity';
 
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
@@ -303,13 +421,15 @@ class PomecExcelService
         $sheet->setCellValue('A1', 'SWISS-BELHOTEL WATERFRONT MAKASSAR - POMEC '.strtoupper($utilityType).' REPORT');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(13);
 
-        if ($utilityType === 'electricity') {
-            $headers = ['Tanggal', 'Meter / Panel', 'LWBP (kWh)', 'WBP (kWh)', 'Total (kWh)', 'Batch Import', 'Catatan'];
-            $lastCol = 'G';
-        } else {
-            $headers = ['Tanggal', 'Meter', 'Pemakaian Air (m3)', 'Batch Import', 'Catatan'];
-            $lastCol = 'E';
-        }
+        $headers = [
+            'Tanggal',
+            'Meter',
+            ...($isElec ? ['LWBP (kWh)', 'WBP (kWh)', 'Total (kWh)'] : ["Pemakaian ({$type['unit']})"]),
+            ...($type['cost'] ? ['Biaya sebelum pajak (Rp)'] : []),
+            'Batch Import',
+            'Catatan',
+        ];
+        $lastCol = chr(ord('A') + count($headers) - 1);
 
         $sheet->fromArray($headers, null, 'A3');
         $sheet->getStyle("A3:{$lastCol}3")->applyFromArray([
@@ -318,26 +438,17 @@ class PomecExcelService
         ]);
 
         $rowNum = 4;
-        foreach ($records as $record) {
-            if ($utilityType === 'electricity') {
-                $sheet->fromArray([
-                    $record->reading_date->format('Y-m-d'),
-                    ExcelCell::sanitize((string) $record->meter_name),
-                    (float) $record->lwbp_value,
-                    (float) $record->wbp_value,
-                    (float) $record->total_usage,
-                    ExcelCell::sanitize((string) $record->import?->batch_code),
-                    ExcelCell::sanitize((string) $record->notes),
-                ], null, "A{$rowNum}");
-            } else {
-                $sheet->fromArray([
-                    $record->reading_date->format('Y-m-d'),
-                    ExcelCell::sanitize((string) $record->meter_name),
-                    (float) $record->water_m3,
-                    ExcelCell::sanitize((string) $record->import?->batch_code),
-                    ExcelCell::sanitize((string) $record->notes),
-                ], null, "A{$rowNum}");
-            }
+        foreach ($query->get() as $record) {
+            $sheet->fromArray([
+                $record->reading_date->format('Y-m-d'),
+                ExcelCell::sanitize((string) $record->meter_name),
+                ...($isElec
+                    ? [(float) $record->lwbp_value, (float) $record->wbp_value, (float) $record->total_usage]
+                    : [(float) $record->total_usage]),
+                ...($type['cost'] ? [$record->cost === null ? null : (float) $record->cost] : []),
+                ExcelCell::sanitize((string) $record->import?->batch_code),
+                ExcelCell::sanitize((string) $record->notes),
+            ], null, "A{$rowNum}", true);
             $rowNum++;
         }
 
@@ -353,19 +464,5 @@ class PomecExcelService
         }, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
-    }
-
-    private function parseNumeric(mixed $value): ?float
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-        if (is_numeric($value)) {
-            return (float) $value;
-        }
-
-        $normalized = str_replace([',', ' '], ['.', ''], (string) $value);
-
-        return is_numeric($normalized) ? (float) $normalized : null;
     }
 }

@@ -327,7 +327,7 @@
         <!-- Main Executive Content -->
         <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
             <!-- KPI Row (2 cols mobile, 4 cols desktop) -->
-            <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <section id="report-kpi-row" class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 {{ $activeTab === 'pomec' ? 'hidden' : '' }}">
                 <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-2">
                     <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'Total Reports' : 'Total Laporan' }}</div>
                     <div class="flex items-baseline justify-between">
@@ -363,7 +363,7 @@
 
                 <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-2">
                     @if ($canPomec)
-                        <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'POMEC Electricity (MTD)' : 'POMEC Listrik (MTD)' }}</div>
+                        <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'POMEC Electricity (all data)' : 'POMEC Listrik (semua data)' }}</div>
                         <div class="flex items-baseline justify-between gap-1">
                             <div class="text-xl sm:text-2xl font-heading font-extrabold font-mono-num text-teal">{{ number_format($electricityTotal, 0, ',', '.') }}</div>
                             <span class="text-[11px] font-mono-num text-slate-500">kWh</span>

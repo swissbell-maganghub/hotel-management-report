@@ -1584,7 +1584,7 @@ class ChatbotService
         foreach ($latestRecords as $rec) {
             $cards[] = [
                 'title' => $rec->meter_name.' ('.$rec->reading_date->format('d M Y').')',
-                'badge' => $rec->utility_type === 'electricity' ? $fmt((float) $rec->total_usage).' kWh' : $fmt((float) $rec->water_m3, 1).' m³',
+                'badge' => $fmt((float) $rec->total_usage, $rec->utility_type === 'water' ? 1 : 0).' '.PomecRecord::unitFor($rec->utility_type),
                 'badge_tone' => 'slate',
                 'meta' => $rec->notes ?: ucfirst($rec->utility_type),
             ];
@@ -1597,7 +1597,7 @@ class ChatbotService
                 ."\n- ".($isEn ? 'Electricity' : 'Listrik').': **'.$fmt($t['electricity_kwh']).' kWh** (LWBP '.$fmt($t['lwbp_kwh']).' kWh, WBP '.$fmt($t['wbp_kwh']).' kWh)'
                 ."\n- ".($isEn ? 'Water' : 'Air').': **'.$fmt($t['water_m3'], 1).' m³**'
                 .($latest ? "\n\n".($isEn ? 'Latest reading: ' : 'Pembacaan terakhir: ').'**'.$latest->meter_name.'**, '.$latest->reading_date->format('d M Y').' — '
-                    .($latest->utility_type === 'electricity' ? $fmt((float) $latest->total_usage).' kWh' : $fmt((float) $latest->water_m3, 1).' m³').'.' : '');
+                    .$fmt((float) $latest->total_usage, $latest->utility_type === 'water' ? 1 : 0).' '.PomecRecord::unitFor($latest->utility_type).'.' : '');
 
         $this->audit($user, 'chatbot.query', 'Chatbot', 'Query ringkasan POMEC via AI Assistant.');
 
@@ -1613,7 +1613,7 @@ class ChatbotService
                     'meter' => $rec->meter_name,
                     'date' => $rec->reading_date->format('d M Y'),
                     'type' => $rec->utility_type,
-                    'usage' => $rec->utility_type === 'electricity' ? $fmt((float) $rec->total_usage).' kWh' : $fmt((float) $rec->water_m3, 1).' m³',
+                    'usage' => $fmt((float) $rec->total_usage, $rec->utility_type === 'water' ? 1 : 0).' '.PomecRecord::unitFor($rec->utility_type),
                     'notes' => $this->sanitizeForPrompt($rec->notes, 100),
                 ])->all(),
             ];
@@ -2359,7 +2359,8 @@ class ChatbotService
                     'date' => $p->reading_date?->format('d M Y'),
                     'type' => $p->utility_type,
                     'meter' => $this->sanitizeForPrompt($p->meter_name, 40),
-                    'usage' => $p->utility_type === 'water' ? (float) $p->water_m3 : (float) $p->total_usage,
+                    'usage' => (float) $p->total_usage,
+                    'unit' => PomecRecord::unitFor($p->utility_type),
                 ])->all();
             }
         }

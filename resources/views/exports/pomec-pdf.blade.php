@@ -18,6 +18,7 @@
 </head>
 <body>
     @php
+        $type = \App\Models\PomecRecord::TYPES[$utilityType];
         $logoFile = public_path('images/swissbel-logo.png');
         $logoBase64 = file_exists($logoFile) ? 'data:image/png;base64,'.base64_encode(file_get_contents($logoFile)) : null;
     @endphp
@@ -31,7 +32,7 @@
                 @endif
                 <td style="vertical-align: middle;">
                     <div class="brand">Swiss-Belhotel Waterfront Makassar • POMEC Utility Management</div>
-                    <h1>Laporan Utilitas POMEC — {{ $utilityType === 'electricity' ? 'Listrik (LWBP & WBP)' : 'Pemakaian Air (m³)' }}</h1>
+                    <h1>Laporan Utilitas POMEC — {{ $type['id'] }} ({{ $utilityType === 'electricity' ? 'LWBP & WBP, kWh' : $type['unit'] }})</h1>
                     <div style="font-size: 10px; color: #475569;">Dicetak oleh: {{ $generatedBy->name }} • {{ now()->timezone('Asia/Makassar')->format('d M Y H:i:s') }} WITA</div>
                 </td>
             </tr>
@@ -48,7 +49,10 @@
                     <th class="num">WBP (kWh)</th>
                     <th class="num">Total (kWh)</th>
                 @else
-                    <th class="num">Pemakaian Air (m³)</th>
+                    <th class="num">Pemakaian ({{ $type['unit'] }})</th>
+                @endif
+                @if ($type['cost'])
+                    <th class="num">Biaya sebelum pajak (Rp)</th>
                 @endif
                 <th>Batch Import</th>
                 <th>Catatan</th>
@@ -64,7 +68,10 @@
                         <td class="num">{{ number_format((float) $rec->wbp_value, 2, ',', '.') }}</td>
                         <td class="num">{{ number_format((float) $rec->total_usage, 2, ',', '.') }}</td>
                     @else
-                        <td class="num">{{ number_format((float) $rec->water_m3, 2, ',', '.') }}</td>
+                        <td class="num">{{ number_format((float) $rec->total_usage, 2, ',', '.') }}</td>
+                    @endif
+                    @if ($type['cost'])
+                        <td class="num">{{ $rec->cost === null ? '-' : number_format((float) $rec->cost, 0, ',', '.') }}</td>
                     @endif
                     <td>{{ $rec->import?->batch_code }}</td>
                     <td>{{ $rec->notes }}</td>

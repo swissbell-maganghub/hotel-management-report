@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Department;
 use App\Models\DepartmentReport;
+use App\Models\PomecImport;
+use App\Models\PomecRecord;
 use App\Models\ReportTemplate;
 use App\Models\TopologyComponent;
 use App\Models\User;
@@ -12,6 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
@@ -210,49 +213,95 @@ class HotelManagementReportTest extends TestCase
         Storage::fake('local');
         $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
 
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->fromArray(['Tanggal', 'Meter', 'LWBP', 'WBP', 'Catatan'], null, 'A1');
-        $sheet->fromArray(['2026-11-25', 'Main Panel Test', 1500, 350, 'Uji impor'], null, 'A2');
+        // Tata letak mini mengikuti file asli: nilai langsung di sel yang dibaca parser.
+        $day = fn (int $d) => Date::PHPToExcel("2026-10-{$d} 00:00:00");
+        $files = [
+            'electricity' => [
+                'Electric consumtion Gedung' => ['A7' => [[$day(1), 100, 110, 20, 20700, 50, 55, 10, 15530, 36230]]],
+                // Di sheet Laundry kolom D = WBP dan H = LWBP; baris kedua belum punya angka akhir.
+                'Electric consumtion Laundry' => ['A7' => [
+                    [$day(1), 10, 11, 5, 500, 20, 21, 40, 4000, 4500],
+                    [$day(2), 11, 0, -440, -1, 21, 0, -840, -1, -2],
+                ]],
+            ],
+            'water' => [
+                'Pemakaian air gedung' => ['B5' => [[$day(1), 100, 110, 10, 230000]]],
+                'Pemakaian air Laundry' => ['B5' => [[$day(1), 5, 7, 2, 22332]]],
+                // Jumlah tangki kosong = belum diisi.
+                'Tangki' => ['B4' => [[$day(1), 8, 64, 3000000], [$day(2), null, 0, 0]]],
+            ],
+            'gas' => [
+                'Sheet1' => [
+                    'A3' => [['MONTH : OCTOBER 2026']],
+                    'A6' => [
+                        [1, '07,00', null, null, null, 8, null, null, null, 4, 'Ganti Gas'],
+                        [null, '15,00', null, null, null, 8, null, null, null, 2],
+                        [null, null, null, null, null, null, null, null, 'Total', 6],
+                    ],
+                ],
+            ],
+            'solar' => [
+                // Baris 2 Oktober dilewati karena stok 3 Oktober belum diisi.
+                'SOLAR' => ['B5' => [[$day(1), 1000, 500, 1500, 100], [$day(2), 900, 500, 1400, 1400], [$day(3), null, null, 0, 0]]],
+            ],
+        ];
+        $expected = [
+            'electricity' => ['rows' => 2, 'usage' => 75, 'cost' => 40730],
+            'water' => ['rows' => 3, 'usage' => 76, 'cost' => 3252332],
+            'gas' => ['rows' => 1, 'usage' => 6, 'cost' => null],
+            'solar' => ['rows' => 1, 'usage' => 100, 'cost' => null],
+        ];
 
-        $tmpPath = sys_get_temp_dir().'/pomec_test_'.uniqid().'.xlsx';
-        (new Xlsx($spreadsheet))->save($tmpPath);
+        foreach ($files as $type => $sheets) {
+            $spreadsheet = new Spreadsheet;
+            $spreadsheet->removeSheetByIndex(0);
+            foreach ($sheets as $title => $blocks) {
+                $sheet = $spreadsheet->createSheet()->setTitle($title);
+                foreach ($blocks as $cell => $data) {
+                    $sheet->fromArray($data, null, $cell, true);
+                }
+            }
+            $tmpPath = sys_get_temp_dir().'/pomec_test_'.uniqid().'.xlsx';
+            (new Xlsx($spreadsheet))->save($tmpPath);
+            $upload = fn () => ['utility_type' => $type, 'period_month' => '2026-10', 'excel_file' => new UploadedFile($tmpPath, "{$type}.xlsx", null, null, true)];
 
-        $upload = new UploadedFile($tmpPath, 'pomec_test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+            $previewRes = $this->actingAs($staffEng)
+                ->post('/pomec/preview', $upload())
+                ->assertOk()
+                ->assertJsonPath('preview.is_duplicate_file', false)
+                ->assertJsonPath('preview.valid_count', $expected[$type]['rows'])
+                ->assertJsonPath('preview.error_count', 0);
 
-        $previewRes = $this->actingAs($staffEng)
-            ->post('/pomec/preview', [
-                'utility_type' => 'electricity',
-                'period_month' => '2026-11',
-                'excel_file' => $upload,
-            ])
-            ->assertOk()
-            ->assertJsonPath('preview.is_duplicate_file', false)
-            ->assertJsonPath('preview.valid_count', 1);
+            $this->actingAs($staffEng)
+                ->postJson('/pomec/commit', ['preview_token' => $previewRes->json('preview_token')])
+                ->assertStatus(201);
 
-        $token = $previewRes->json('preview_token');
+            $import = PomecImport::where('utility_type', $type)->latest('id')->firstOrFail();
+            $this->assertEqualsWithDelta($expected[$type]['usage'], (float) $import->total_usage, 0.01, $type);
+            $this->assertEquals($expected[$type]['cost'], $import->total_cost === null ? null : (float) $import->total_cost, $type);
 
-        $this->actingAs($staffEng)
-            ->postJson('/pomec/commit', ['preview_token' => $token])
-            ->assertStatus(201);
+            // Uploading identical file again must flag SHA-256 duplicate and duplicate rows
+            $this->actingAs($staffEng)
+                ->post('/pomec/preview', $upload())
+                ->assertOk()
+                ->assertJsonPath('preview.is_duplicate_file', true)
+                ->assertJsonPath('preview.duplicate_row_count', $expected[$type]['rows']);
 
-        // Uploading identical file again must flag SHA-256 duplicate
-        $duplicateUpload = new UploadedFile($tmpPath, 'pomec_test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+            // Periode yang tidak ada di file ditolak dengan pesan, bukan error server
+            $this->actingAs($staffEng)
+                ->post('/pomec/preview', ['period_month' => '2026-09'] + $upload())
+                ->assertOk()
+                ->assertJsonPath('preview.valid_count', 0)
+                ->assertJsonPath('preview.error_count', 1);
 
-        $this->actingAs($staffEng)
-            ->post('/pomec/preview', [
-                'utility_type' => 'electricity',
-                'period_month' => '2026-11',
-                'excel_file' => $duplicateUpload,
-            ])
-            ->assertOk()
-            ->assertJsonPath('preview.is_duplicate_file', true);
+            @unlink($tmpPath);
 
-        @unlink($tmpPath);
+            $this->actingAs($staffEng)->get("/pomec/export/{$type}/excel")->assertOk()->streamedContent();
+            $this->actingAs($staffEng)->get("/pomec/export/{$type}/pdf?period_month=2026-10")->assertOk()->assertDownload("pomec_{$type}_2026-10.pdf");
+        }
 
-        $this->actingAs($staffEng)->get('/pomec/template/electricity')->assertOk();
-        $this->actingAs($staffEng)->get('/pomec/export/electricity/excel')->assertOk();
-        $this->actingAs($staffEng)->get('/pomec/export/electricity/pdf')->assertOk();
+        $this->assertEquals(40, (float) PomecRecord::where('meter_name', 'PLN Laundry')->value('lwbp_value'));
+        $this->actingAs($staffEng)->get('/?tab=pomec')->assertOk()->assertSee('PLN Laundry')->assertSee('Gas LPG');
 
         // Test temp cleanup artisan command
         Storage::disk('local')->put('pomec/tmp/fresh.xlsx', 'ok');
@@ -405,39 +454,11 @@ class HotelManagementReportTest extends TestCase
             ->assertJsonPath('report.status', 'submitted');
     }
 
-    public function test_pomec_water_import_and_admin_user_lifecycle(): void
+    public function test_admin_user_lifecycle(): void
     {
         Storage::fake('local');
         $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
         $itAdmin = User::where('email', 'it.admin@swissbel.local')->firstOrFail();
-
-        // Water Excel upload & commit
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->fromArray(['Tanggal', 'Meter', 'Pemakaian Air (m3)', 'Catatan'], null, 'A1');
-        $sheet->fromArray(['2026-11-26', 'PDAM Main Meter', 105.5, 'Water test'], null, 'A2');
-
-        $tmpPath = sys_get_temp_dir().'/pomec_water_'.uniqid().'.xlsx';
-        (new Xlsx($spreadsheet))->save($tmpPath);
-
-        $upload = new UploadedFile($tmpPath, 'water_test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
-
-        $previewRes = $this->actingAs($staffEng)
-            ->post('/pomec/preview', [
-                'utility_type' => 'water',
-                'period_month' => '2026-11',
-                'excel_file' => $upload,
-            ])
-            ->assertOk()
-            ->assertJsonPath('preview.valid_count', 1);
-
-        $this->actingAs($staffEng)
-            ->postJson('/pomec/commit', ['preview_token' => $previewRes->json('preview_token')])
-            ->assertStatus(201);
-
-        @unlink($tmpPath);
-        $this->actingAs($staffEng)->get('/pomec/export/water/excel')->assertOk();
-        $this->actingAs($staffEng)->get('/pomec/export/water/pdf')->assertOk();
 
         // IT Admin creates user (HOD without department_id rejected 422)
         $this->actingAs($itAdmin)

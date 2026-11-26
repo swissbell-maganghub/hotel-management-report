@@ -27,10 +27,12 @@
     @yield('body')
 
     <!-- Toast Feedback -->
-    <div id="toast" class="fixed top-20 right-4 z-50 hidden max-w-sm bg-white border border-slate-200 border-l-4 border-l-gold rounded-xl shadow-lg px-4 py-3 text-sm text-slate-800 transition-all">
-        <div class="flex items-start gap-2.5">
-            <span id="toast-dot" class="mt-1.5 w-2 h-2 rounded-full bg-teal shrink-0"></span>
-            <p id="toast-message" class="font-medium leading-snug"></p>
+    <div id="toast" role="status" aria-live="polite" class="fixed top-20 right-4 left-4 sm:left-auto sm:max-w-sm z-50 hidden">
+        <div class="flex items-center gap-3 bg-white border border-slate-200/80 rounded-2xl shadow-lg py-3 pl-3 pr-5">
+            <span id="toast-icon" class="w-8 h-8 rounded-full flex items-center justify-center shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path id="toast-icon-path" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d=""/></svg>
+            </span>
+            <p id="toast-message" class="text-xs font-semibold text-navy leading-snug"></p>
         </div>
     </div>
 
@@ -38,19 +40,24 @@
         window.showToast = function (message, tone = 'info') {
             const toast = document.getElementById('toast');
             const msgEl = document.getElementById('toast-message');
-            const dotEl = document.getElementById('toast-dot');
+            const iconEl = document.getElementById('toast-icon');
             if (!toast || !msgEl) return;
 
+            const [color, path] = {
+                success: ['bg-emerald-50 text-emerald-700', 'M5 13l4 4L19 7'],
+                error: ['bg-rose-50 text-crimson-dark', 'M6 18L18 6M6 6l12 12'],
+            }[tone] || ['bg-cyan-50 text-teal', 'M12 8h.01M12 11v5'];
+
             msgEl.textContent = message;
-            dotEl.className = 'mt-1.5 w-2 h-2 rounded-full shrink-0 ' + (
-                tone === 'error' ? 'bg-crimson' : (tone === 'success' ? 'bg-emerald-600' : 'bg-teal')
-            );
+            iconEl.className = 'w-8 h-8 rounded-full flex items-center justify-center shrink-0 ' + color;
+            document.getElementById('toast-icon-path').setAttribute('d', path);
 
             toast.classList.remove('hidden');
             clearTimeout(window.__toastTimer);
+            // Pesan error biasanya lebih panjang, beri waktu baca lebih lama.
             window.__toastTimer = setTimeout(() => {
                 toast.classList.add('hidden');
-            }, 3000);
+            }, tone === 'error' ? 6000 : 3500);
         };
 
         window.syncSbwmThemeButtons = function () {
