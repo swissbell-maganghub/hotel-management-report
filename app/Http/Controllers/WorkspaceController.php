@@ -385,7 +385,9 @@ class WorkspaceController extends Controller
      */
     private function buildGmCharts($reports, $pomecRecords, array $hotelPulse): array
     {
+        // Grafik ini hanya Listrik dan Air; tanggal gas/solar tidak boleh ikut mengisi slot (jadi batang nol).
         $byDate = $pomecRecords
+            ->whereIn('utility_type', ['electricity', 'water'])
             ->groupBy(fn (PomecRecord $rec) => $rec->reading_date->format('Y-m-d'))
             ->sortKeys()
             ->slice(-10);
