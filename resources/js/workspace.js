@@ -998,11 +998,35 @@ function initWorkspace() {
         document.querySelectorAll('.sidebar-dept-btn').forEach((btn) => {
             const code = btn.dataset.sidebarDept || '';
             const active = onReportsTab && code === activeDept;
-            btn.className = 'sidebar-dept-btn w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] transition cursor-pointer ' +
-                (active ? 'bg-navy/10 text-navy font-semibold' : 'font-medium text-slate-500 hover:bg-slate-100/80 hover:text-navy');
+
+            // Toggle only state classes so the structural layout from Blade is preserved.
+            [
+                ['bg-navy/10', active],
+                ['text-navy', active],
+                ['font-semibold', active],
+                ['text-slate-500', !active],
+                ['font-medium', !active],
+                ['hover:bg-slate-100/80', !active],
+                ['hover:text-navy', !active],
+            ].forEach(([cls, on]) => btn.classList.toggle(cls, on));
+
+            const chipEl = btn.querySelector('.sidebar-dept-chip');
+            if (chipEl) {
+                chipEl.classList.toggle('bg-navy', active);
+                chipEl.classList.toggle('text-white', active);
+                chipEl.classList.toggle('bg-slate-100', !active);
+                chipEl.classList.toggle('text-slate-500', !active);
+            }
+
             const cEl = btn.querySelector('[data-sidebar-dept-count]');
             if (cEl) {
                 cEl.textContent = code === '' ? String(REPORTS_DATA.length) : String(countsByDept[code] || 0);
+                cEl.classList.toggle('bg-navy', active);
+                cEl.classList.toggle('text-white', active);
+                cEl.classList.toggle('bg-white', !active);
+                cEl.classList.toggle('border', !active);
+                cEl.classList.toggle('border-slate-200', !active);
+                cEl.classList.toggle('text-slate-600', !active);
             }
         });
 

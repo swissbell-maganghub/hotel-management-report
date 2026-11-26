@@ -130,25 +130,32 @@
                     </button>
 
                     @if ($tabKey === 'reports' && ($accessibleDepts ?? collect())->count() > 1)
-                        @php $currentSidebarDept = $activeReportDept ?? ''; @endphp
-                        <div id="sidebar-reports-submenu" class="sidebar-text ml-3.5 pl-2.5 border-l border-slate-200/80 space-y-0.5 py-0.5 {{ $activeTab === 'reports' ? '' : 'hidden' }}">
+                        @php
+                            $currentSidebarDept = $activeReportDept ?? '';
+                            $sidebarRowBase = 'sidebar-dept-btn w-full flex items-center gap-2 pl-2 pr-1.5 py-1.5 rounded-lg text-[11px] leading-none transition cursor-pointer';
+                            $sidebarRowActive = 'bg-navy/10 text-navy font-semibold';
+                            $sidebarRowIdle = 'text-slate-500 font-medium hover:bg-slate-100/80 hover:text-navy';
+                            $sidebarChipBase = 'sidebar-dept-chip shrink-0 inline-flex items-center justify-center w-9 h-5 rounded-md font-mono-num text-[9px] font-bold tracking-wider';
+                            $sidebarCountBase = 'shrink-0 inline-flex items-center justify-center min-w-[1.4rem] h-5 px-1.5 rounded-full font-mono-num text-[10px] font-bold leading-none';
+                        @endphp
+                        <div id="sidebar-reports-submenu" class="sidebar-text mt-1 ml-4 pl-3 border-l border-slate-200/80 space-y-0.5 pb-1 {{ $activeTab === 'reports' ? '' : 'hidden' }}">
                             <button type="button" data-sidebar-dept="" onclick="selectReportDepartment('')"
-                                class="sidebar-dept-btn w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition cursor-pointer {{ $activeTab === 'reports' && $currentSidebarDept === '' ? 'bg-navy/10 text-navy' : 'text-slate-500 hover:bg-slate-100/80 hover:text-navy' }}">
-                                <span class="truncate">{{ $isEn ? 'All Departments' : 'Semua Dept' }}</span>
-                                <span data-sidebar-dept-count="" class="font-mono-num text-[10px] opacity-80 shrink-0">{{ $reports->count() }}</span>
+                                class="{{ $sidebarRowBase }} {{ $currentSidebarDept === '' ? $sidebarRowActive : $sidebarRowIdle }}">
+                                <span class="{{ $sidebarChipBase }} {{ $currentSidebarDept === '' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-500' }}">ALL</span>
+                                <span class="flex-1 min-w-0 truncate text-left">{{ $isEn ? 'All Departments' : 'Semua Dept' }}</span>
+                                <span data-sidebar-dept-count="" class="{{ $sidebarCountBase }} {{ $currentSidebarDept === '' ? 'bg-navy text-white' : 'bg-white border border-slate-200 text-slate-600' }}">{{ $reports->count() }}</span>
                             </button>
                             @foreach ($accessibleDepts as $subDept)
                                 @php
                                     $subCount = $reports->where('department_id', $subDept->id)->count();
                                     $isSubActive = $activeTab === 'reports' && $currentSidebarDept === $subDept->code;
+                                    $subName = $subDept->localizedName($locale);
                                 @endphp
-                                <button type="button" data-sidebar-dept="{{ $subDept->code }}" onclick="selectReportDepartment('{{ $subDept->code }}')"
-                                    class="sidebar-dept-btn w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition cursor-pointer {{ $isSubActive ? 'bg-navy/10 text-navy font-semibold' : 'text-slate-500 hover:bg-slate-100/80 hover:text-navy' }}">
-                                    <span class="flex items-center gap-1.5 min-w-0">
-                                        <span class="font-mono-num text-[9px] font-bold px-1 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">{{ $subDept->code }}</span>
-                                        <span class="truncate">{{ $subDept->localizedName($locale) }}</span>
-                                    </span>
-                                    <span data-sidebar-dept-count="{{ $subDept->code }}" class="font-mono-num text-[10px] opacity-80 shrink-0">{{ $subCount }}</span>
+                                <button type="button" data-sidebar-dept="{{ $subDept->code }}" onclick="selectReportDepartment('{{ $subDept->code }}')" title="{{ $subName }} ({{ $subCount }})"
+                                    class="{{ $sidebarRowBase }} {{ $isSubActive ? $sidebarRowActive : $sidebarRowIdle }}">
+                                    <span class="{{ $sidebarChipBase }} {{ $isSubActive ? 'bg-navy text-white' : 'bg-slate-100 text-slate-500' }}">{{ $subDept->code }}</span>
+                                    <span class="flex-1 min-w-0 truncate text-left">{{ $subName }}</span>
+                                    <span data-sidebar-dept-count="{{ $subDept->code }}" class="{{ $sidebarCountBase }} {{ $isSubActive ? 'bg-navy text-white' : 'bg-white border border-slate-200 text-slate-600' }}">{{ $subCount }}</span>
                                 </button>
                             @endforeach
                         </div>
