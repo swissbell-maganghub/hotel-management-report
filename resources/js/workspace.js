@@ -1,4 +1,24 @@
 import Chart from 'chart.js/auto';
+import {
+    constructTable,
+    createPaginatedRowModel,
+    createSortedRowModel,
+    rowPaginationFeature,
+    rowSortingFeature,
+    sortFns,
+    tableFeatures,
+} from '@tanstack/table-core';
+import { storeReactivityBindings } from '@tanstack/table-core/store-reactivity-bindings';
+
+// TanStack Table (headless): mengurus urutan dan halaman; markup tabel tetap milik kita.
+const DATA_TABLE_FEATURES = tableFeatures({
+    coreReactivityFeature: storeReactivityBindings(),
+    rowSortingFeature,
+    rowPaginationFeature,
+    sortedRowModel: createSortedRowModel(),
+    paginatedRowModel: createPaginatedRowModel(),
+    sortFns,
+});
 
 const I18N = {
     id: {
@@ -25,11 +45,6 @@ const I18N = {
         markReviewed: 'Tandai Reviewed',
         returnRevision: 'Kembalikan untuk Revisi',
         close: 'Tutup',
-        dupFileTitle: 'Duplikasi File Terdeteksi (SHA-256)',
-        dupFileDesc: 'File ini identik dengan batch',
-        uniqueHashTitle: 'SHA-256 Unik',
-        valid: 'valid',
-        errorDup: 'error/duplikat',
         checkingData: 'Sedang mengecek data terkontrol...',
         assistantUnavailable: 'Layanan asisten sementara tidak tersedia.',
         editUser: 'Ubah Pengguna',
@@ -60,11 +75,6 @@ const I18N = {
         markReviewed: 'Mark as Reviewed',
         returnRevision: 'Return for Revision',
         close: 'Close',
-        dupFileTitle: 'Duplicate File Detected (SHA-256)',
-        dupFileDesc: 'This file matches existing batch',
-        uniqueHashTitle: 'Unique SHA-256',
-        valid: 'valid',
-        errorDup: 'error/duplicate',
         checkingData: 'Checking controlled data...',
         assistantUnavailable: 'Assistant service temporarily unavailable.',
         editUser: 'Edit User',
@@ -208,7 +218,7 @@ function initWorkspace() {
     let AUDIT_LOGS = boot.auditLogs || [];
     let BACKUP_FILES = boot.backupFiles || [];
 
-    let reportFilterState = { search: '', dept: boot.activeReportDept || '', period: '', date: '', status: 'all' };
+    let reportFilterState = { search: '', dept: boot.activeReportDept || '', period: '', date: '', status: 'all', list: false };
     let historyActionFilter = '';
     let adminFilterState = { search: '', role: '', dept: '', status: 'all' };
     let auditModuleFilter = '';
@@ -218,9 +228,11 @@ function initWorkspace() {
     let auditDateFrom = '';
     let auditWorkflowSearch = '';
     let auditWorkflowActionFilter = '';
-    let pomecFilterType = 'all';
-    let pomecMonthFilter = '';
-    let pomecSearchQuery = '';
+    let pomecType = 'all';
+    let pomecReportStatus = 'all';
+    let pomecReplace = null; // laporan POMEC yang dikembalikan HOD dan sedang diunggah ulang
+    let pomecView = 'day'; // 'day' | 'week' | 'month'
+    let pomecMonth = '';
     let editorRows = [];
     let editorTitleTouched = false;
     let currentPomecPreviewToken = null;
@@ -228,7 +240,6 @@ function initWorkspace() {
     const tableStates = {
         reports: { page: 1, perPage: 10, sortKey: 'period_date', sortDir: 'desc', lastFilterSig: '' },
         histories: { page: 1, perPage: 10, sortKey: 'created_at', sortDir: 'desc', lastFilterSig: '' },
-        pomec: { page: 1, perPage: 10, sortKey: 'reading_date', sortDir: 'desc', lastFilterSig: '' },
         users: { page: 1, perPage: 10, sortKey: 'name', sortDir: 'asc', lastFilterSig: '' },
         audit: { page: 1, perPage: 10, sortKey: 'created_at', sortDir: 'desc', lastFilterSig: '' },
         auditWorkflow: { page: 1, perPage: 10, sortKey: 'created_at', sortDir: 'desc', lastFilterSig: '' },
@@ -326,6 +337,76 @@ function initWorkspace() {
         });
     }
 
+    /**
+     * Tabel data dengan TanStack Table: kepala kolom bisa diurutkan (aria-sort), 10 baris per halaman.
+     * columns: [{ id, header, accessor?, cell, align?, visible?, tdClass? }]; tanpa accessor = tidak bisa diurutkan.
+     */
+    function createDataTable({ tableId, pagerId, columns, sorting = [], empty }) {
+        const el = document.getElementById(tableId);
+        if (!el) return null;
+        const table = constructTable({
+            features: DATA_TABLE_FEATURES,
+            data: [],
+            columns: columns.map((c) => ({
+                id: c.id,
+                accessorFn: c.accessor || (() => ''),
+                header: c.id,
+                enableSorting: !!c.accessor,
+                sortingFn: 'basic',
+                sortDescFirst: c.align === 'right',
+            })),
+            initialState: { sorting, pagination: { pageIndex: 0, pageSize: 10 } },
+        });
+        const text = (v) => (typeof v === 'function' ? v() : v);
+        const alignCls = (c) => (c.align === 'right' ? 'text-right' : '');
+
+        const render = () => {
+            const { pageIndex, pageSize } = table.store.state.pagination;
+            const pageCount = Math.max(1, table.getPageCount());
+            // Data berkurang (filter, hapus) dan halaman ini jadi kosong: mundur ke halaman terakhir.
+            if (pageIndex >= pageCount) return table.setPageIndex(pageCount - 1);
+
+            const shown = columns.filter((c) => !c.visible || c.visible());
+            el.tHead.innerHTML = `<tr>${shown.map((c) => {
+                const col = table.getColumn(c.id);
+                const label = escapeHtml(text(c.header));
+                if (!col.getCanSort()) return `<th scope="col" class="py-3 px-5 ${alignCls(c)}">${label}</th>`;
+                const sorted = col.getIsSorted();
+                const aria = sorted === 'asc' ? 'ascending' : (sorted === 'desc' ? 'descending' : 'none');
+                return `<th scope="col" class="py-3 px-5 ${alignCls(c)}" aria-sort="${aria}">
+                    <button type="button" data-sort="${c.id}" class="inline-flex items-center gap-1 uppercase tracking-wider font-semibold whitespace-nowrap hover:text-navy transition cursor-pointer ${c.align === 'right' ? 'flex-row-reverse' : ''}">
+                        ${label}<span aria-hidden="true" class="text-[10px] ${sorted ? 'text-navy' : 'opacity-40'}">${sorted === 'asc' ? '↑' : (sorted === 'desc' ? '↓' : '↕')}</span>
+                    </button>
+                </th>`;
+            }).join('')}</tr>`;
+
+            const rows = table.getRowModel().rows;
+            el.tBodies[0].innerHTML = rows.length
+                ? rows.map((row) => `<tr class="hover:bg-slate-50/70 transition">${shown.map((c) => `<td class="py-3 px-5 ${alignCls(c)} ${c.tdClass || ''}">${c.cell(row.original)}</td>`).join('')}</tr>`).join('')
+                : `<tr><td colspan="${shown.length}" class="py-8 text-center text-slate-400">${escapeHtml(text(empty))}</td></tr>`;
+
+            const pager = { page: pageIndex + 1, perPage: pageSize };
+            renderPaginationFooter(pagerId, pager, table.getPrePaginatedRowModel().rows.length, pageCount, pageIndex * pageSize, rows.length, () => {
+                if (pager.perPage !== pageSize) table.setPageSize(pager.perPage);
+                table.setPageIndex(pager.page - 1);
+            });
+        };
+
+        el.tHead.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-sort]');
+            if (btn) table.getColumn(btn.dataset.sort).getToggleSortingHandler()(e);
+        });
+        table.store.subscribe(render);
+
+        return {
+            setData(data, { resetPage = false } = {}) {
+                table.setOptions((prev) => ({ ...prev, data }));
+                if (resetPage && table.store.state.pagination.pageIndex !== 0) table.setPageIndex(0);
+                else render();
+            },
+        };
+    }
+
     function bindSortableHeaders(tableId, state, onUpdate) {
         const table = document.getElementById(tableId);
         if (!table) return;
@@ -398,6 +479,8 @@ function initWorkspace() {
 
     function canEditReport(rpt) {
         if (!['draft', 'returned'].includes(rpt.status)) return false;
+        // Form manual dimatikan; hanya laporan POMEC yang masih bisa ditindaklanjuti.
+        if (!rpt.pomec_import_id && !boot.manualReports) return false;
         if (CURRENT_USER.role === 'it_admin') return true;
         const allowed = CURRENT_USER.inputtableDepartmentIds || [];
         return allowed.includes(rpt.department_id);
@@ -467,6 +550,10 @@ function initWorkspace() {
         renderReportsTable();
         renderReportHistories();
         refreshKpis();
+        if (updated.pomec_import_id) {
+            renderPomecImports();
+            renderPomecFreshness();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -619,15 +706,23 @@ function initWorkspace() {
         notifDropdown?.classList.toggle('hidden');
     });
 
+    // Engineering melapor lewat POMEC: halaman laporannya adalah POMEC.
+    const hasPomec = () => !!document.getElementById('pomec-root');
+    const engOnly = () => (boot.accessibleDepts || []).length === 1 && boot.accessibleDepts[0].code === 'ENG' && hasPomec();
+
     window.switchWorkspaceTab = function (tabKey, { toggleSubmenu = false } = {}) {
+        if (tabKey === 'reports' && engOnly()) tabKey = 'pomec';
         const currentVisiblePanel = document.querySelector('.workspace-panel:not(.hidden)');
         const alreadyOnTab = currentVisiblePanel?.id === `tab-panel-${tabKey}`;
 
         document.querySelectorAll('.workspace-panel').forEach((p) => p.classList.add('hidden'));
         document.getElementById(`tab-panel-${tabKey}`)?.classList.remove('hidden');
+        updateKpiRow();
 
+        // POMEC berada di bawah Laporan Departemen → Engineering.
+        const navKey = tabKey === 'pomec' ? 'reports' : tabKey;
         document.querySelectorAll('.workspace-tab-btn').forEach((btn) => {
-            const active = btn.dataset.tab === tabKey;
+            const active = btn.dataset.tab === navKey;
             btn.className = 'workspace-tab-btn w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ' +
                 (active ? 'bg-navy text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100/80 hover:text-navy');
         });
@@ -637,7 +732,7 @@ function initWorkspace() {
         const reportsNavBtn = document.querySelector('.workspace-tab-btn[data-tab="reports"]');
         if (submenuEl) {
             const isCurrentlyOpen = !submenuEl.classList.contains('hidden');
-            const openSubmenu = tabKey === 'reports'
+            const openSubmenu = navKey === 'reports'
                 ? ((toggleSubmenu && alreadyOnTab) ? !isCurrentlyOpen : true)
                 : false;
             submenuEl.classList.toggle('hidden', !openSubmenu);
@@ -671,7 +766,7 @@ function initWorkspace() {
             const shouldAnimateReveal = !revealedChartTabs.has(tabKey);
             revealedChartTabs.add(tabKey);
             window.requestAnimationFrame(() => {
-                ['gm-chart-pomec-trend', 'gm-chart-report-status', 'gm-chart-hk-rooms', 'reports-chart-status', 'reports-chart-trend', 'reports-chart-dept', 'pomec-chart-trend', 'pomec-chart-split'].forEach((id) => {
+                ['gm-chart-pomec-trend', 'gm-chart-report-status', 'gm-chart-hk-rooms', 'reports-chart-status', 'reports-chart-trend', 'reports-chart-dept', 'pomec-chart-trend', 'pomec-chart-cost', 'pomec-mini-electricity', 'pomec-mini-water', 'pomec-mini-gas', 'pomec-mini-solar'].forEach((id) => {
                     const c = document.getElementById(id);
                     const chart = c ? Chart.getChart(c) : null;
                     if (!chart) return;
@@ -736,6 +831,84 @@ function initWorkspace() {
         return true;
     }
 
+    // Ringkasan semua departemen tampil selama belum memilih departemen, memfilter, atau membuka daftar lengkap.
+    function isReportsOverview() {
+        const f = reportFilterState;
+        return (boot.accessibleDepts || []).length > 1 && !f.dept && !f.list && !f.search.trim() && !f.period && !f.date && f.status === 'all';
+    }
+
+    function updateKpiRow() {
+        const shown = (id) => document.getElementById(id)?.classList.contains('hidden') === false;
+        document.getElementById('report-kpi-row')?.classList.toggle('hidden', shown('tab-panel-pomec') || (shown('tab-panel-reports') && !isReportsOverview()));
+    }
+
+    // Satu kartu per departemen, lalu laporan yang masih menunggu.
+    function renderReportsOverview() {
+        const grid = document.getElementById('reports-overview-cards');
+        const waitingList = document.getElementById('reports-overview-waiting');
+        if (!grid || !waitingList) return;
+        const deptName = (d) => (IS_EN ? (d.name_en || d.name) : d.name);
+        const card = 'bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(15,23,42,0.04)]';
+
+        grid.innerHTML = (boot.accessibleDepts || []).map((dept) => {
+            const own = REPORTS_DATA.filter((r) => r.department?.code === dept.code);
+            const parts = REPORT_STATUS_META.map((m) => ({ ...m, count: own.filter((r) => r.status === m.key).length })).filter((m) => m.count);
+            const reviewed = own.filter((r) => r.status === 'reviewed').length;
+            const latest = own.reduce((max, r) => {
+                const d = formatWitaIsoDate(r.period_date);
+                return d > max ? d : max;
+            }, '');
+
+            return `<div class="${card} flex flex-col hover:border-teal transition">
+                <button type="button" data-open-dept="${escapeHtml(dept.code)}" class="grow flex flex-col gap-3 p-4 text-left cursor-pointer">
+                    <span class="flex items-center gap-2 min-w-0">
+                        <span class="px-1.5 py-0.5 rounded-md bg-slate-100 text-navy text-[10px] font-bold tracking-wider">${escapeHtml(dept.code)}</span>
+                        <span class="flex-1 truncate text-sm font-heading font-bold text-navy">${escapeHtml(deptName(dept))}</span>
+                        <span class="text-teal text-xs" aria-hidden="true">&rarr;</span>
+                    </span>
+                    <span class="flex items-baseline justify-between gap-2">
+                        <span><span class="text-2xl font-heading font-extrabold text-navy">${own.length}</span> <span class="text-xs text-slate-500">${IS_EN ? (own.length === 1 ? 'report' : 'reports') : 'laporan'}</span></span>
+                        <span class="text-[11px] text-slate-500">${own.length ? `${Math.round((reviewed / own.length) * 100)}% ${IS_EN ? 'approved' : 'disetujui'}` : ''}</span>
+                    </span>
+                    <span class="flex gap-0.5 h-2 rounded-full overflow-hidden bg-slate-100" aria-hidden="true">${parts.map((m) => `<span style="flex:${m.count} 1 0%;background-color:${m.color}"></span>`).join('')}</span>
+                    <span class="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600 min-h-4">${parts.length
+                        ? parts.map((m) => `<span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full" style="background-color:${m.color}"></span>${m.count} ${escapeHtml(m.label)}</span>`).join('')
+                        : (IS_EN ? 'No reports yet' : 'Belum ada laporan')}</span>
+                    <span class="mt-auto text-[11px] text-slate-400">${latest ? `${IS_EN ? 'Latest period' : 'Periode terakhir'}: ${escapeHtml(formatWitaDateLabel(latest, IS_EN))}` : '&nbsp;'}</span>
+                </button>
+            </div>`;
+        }).join('');
+
+        const since = (r) => r.submitted_at || r.updated_at;
+        const waiting = REPORTS_DATA.filter((r) => ['submitted', 'in_review', 'returned'].includes(r.status))
+            .sort((a, b) => new Date(since(a)) - new Date(since(b)));
+        const rows = waiting.slice(0, 6).map((r) => `<li>
+            <button type="button" data-open-report="${Number(r.id)}" class="w-full flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3 text-left hover:bg-slate-50/70 transition cursor-pointer">
+                <span class="w-10 text-[10px] font-bold text-slate-500">${escapeHtml(r.department?.code || '-')}</span>
+                <span class="flex-1 min-w-[180px] truncate font-semibold text-navy">${escapeHtml(r.title)}</span>
+                <span class="text-slate-500 whitespace-nowrap">${IS_EN ? 'since' : 'sejak'} ${escapeHtml(formatWitaDateLabel(since(r), IS_EN))}</span>
+                ${statusBadgeHtml(r.status)}
+            </button>
+        </li>`);
+        if (waiting.length > 6) rows.push(`<li class="px-5 py-2.5 text-slate-500">${IS_EN ? `${waiting.length - 6} more in all reports.` : `${waiting.length - 6} lainnya ada di semua laporan.`}</li>`);
+        waitingList.innerHTML = rows.join('') || `<li class="px-5 py-6 text-center text-slate-400">${IS_EN ? 'Nothing is waiting.' : 'Tidak ada laporan yang menunggu.'}</li>`;
+    }
+
+    document.getElementById('reports-overview')?.addEventListener('click', (e) => {
+        const target = e.target.closest('button');
+        if (!target) return;
+        if (target.dataset.openDept) {
+            window.selectReportDepartment(target.dataset.openDept);
+            window.scrollTo({ top: 0 });
+        } else if (target.dataset.openReport) {
+            window.openReportDetail(Number(target.dataset.openReport));
+        } else if (target.hasAttribute('data-show-all-reports')) {
+            reportFilterState.list = true;
+            renderReportsTable();
+            renderReportHistories();
+        }
+    });
+
     function renderReportsTable() {
         const tbody = document.getElementById('reports-tbody');
         const emptyOnboard = document.getElementById('reports-empty-onboarding');
@@ -748,6 +921,15 @@ function initWorkspace() {
             syncReportDepartmentSubmenus();
         } catch (err) {
             console.error('Failed to sync department submenus:', err);
+        }
+        const overview = isReportsOverview();
+        document.getElementById('reports-overview')?.classList.toggle('hidden', !overview);
+        document.getElementById('reports-list-view')?.classList.toggle('hidden', overview);
+        document.getElementById('reports-back-btn')?.classList.toggle('hidden', overview);
+        updateKpiRow();
+        if (overview) {
+            renderReportsOverview();
+            return;
         }
         try {
             renderReportsInsights(filtered);
@@ -806,7 +988,7 @@ function initWorkspace() {
                             <button type="button" onclick="openReportDetail(${rpt.id})" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-navy hover:text-white text-navy transition cursor-pointer">
                                 ${canReviewReport(rpt) ? T.review : T.view}
                             </button>
-                            ${canEditReport(rpt) ? `
+                            ${canEditReport(rpt) && !rpt.pomec_import_id ? `
                                 <button type="button" onclick="openReportEditor(${rpt.id})" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal/10 text-teal hover:bg-teal hover:text-white transition cursor-pointer">
                                     ${T.edit}
                                 </button>` : ''}
@@ -957,47 +1139,17 @@ function initWorkspace() {
         }
 
         const countsByDept = {};
-        const alertsByDept = {};
         REPORTS_DATA.forEach((rpt) => {
             const code = rpt.department?.code;
             if (!code) return;
             countsByDept[code] = (countsByDept[code] || 0) + 1;
-            if (['submitted', 'in_review', 'returned'].includes(rpt.status)) {
-                alertsByDept[code] = (alertsByDept[code] || 0) + 1;
-            }
         });
 
-        document.querySelectorAll('.report-dept-tab-btn').forEach((btn) => {
-            const code = btn.dataset.deptTab || '';
-            const active = code === activeDept;
-            const padCls = code === '' ? 'px-3 gap-2' : 'px-2.5 gap-1.5';
-            btn.className = `report-dept-tab-btn inline-flex items-center ${padCls} py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ` +
-                (active ? 'bg-navy text-white border-navy shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-navy');
-
-            const codeBadge = code ? btn.firstElementChild : null;
-            if (codeBadge && !codeBadge.hasAttribute('data-dept-tab-count')) {
-                codeBadge.className = 'font-mono-num text-[10px] font-bold px-1.5 py-0.5 rounded ' +
-                    (active ? 'bg-white/15 text-white' : 'bg-white border border-slate-200 text-navy');
-            }
-
-            const countSpan = btn.querySelector('[data-dept-tab-count]');
-            if (countSpan) {
-                countSpan.textContent = code === '' ? String(REPORTS_DATA.length) : String(countsByDept[code] || 0);
-                countSpan.className = 'font-mono-num text-[10px] font-bold leading-none min-w-[1.15rem] text-center px-1 py-0.5 rounded-full ' +
-                    (active ? 'bg-white/15 text-white' : 'bg-slate-200/70 text-slate-700');
-            }
-
-            const dotSpan = btn.querySelector('[data-dept-alert-dot]');
-            if (dotSpan) {
-                const alertCnt = alertsByDept[code] || 0;
-                dotSpan.classList.toggle('hidden', alertCnt === 0);
-                dotSpan.title = `${alertCnt} ${IS_EN ? 'needs attention' : 'perlu tindakan'}`;
-            }
-        });
-
+        const onPomecTab = !document.getElementById('tab-panel-pomec')?.classList.contains('hidden');
         document.querySelectorAll('.sidebar-dept-btn').forEach((btn) => {
             const code = btn.dataset.sidebarDept || '';
-            const active = onReportsTab && code === activeDept;
+            // Di halaman POMEC, baris Engineering yang menyala.
+            const active = (onReportsTab && code === activeDept) || (onPomecTab && code === 'ENG');
 
             // Toggle only state classes so the structural layout from Blade is preserved.
             [
@@ -1030,16 +1182,12 @@ function initWorkspace() {
             }
         });
 
-        const scoped = activeDept ? REPORTS_DATA.filter((r) => r.department?.code === activeDept) : REPORTS_DATA;
-        const reviewedCnt = scoped.filter((r) => r.status === 'reviewed').length;
-        const actionableCnt = scoped.filter((r) => ['submitted', 'in_review', 'returned'].includes(r.status)).length;
         const deptObj = activeDept ? depts.find((d) => d.code === activeDept) : (depts.length === 1 ? depts[0] : null);
         const multiDept = depts.length > 1;
 
         const badgeEl = document.getElementById('reports-active-dept-badge');
         const titleEl = document.getElementById('reports-active-dept-title');
         const subtitleEl = document.getElementById('reports-active-dept-subtitle');
-        const statsEl = document.getElementById('reports-active-dept-stats');
 
         if (badgeEl) {
             badgeEl.textContent = deptObj ? deptObj.code : (IS_EN ? 'ALL DEPTS' : 'SEMUA DEPT');
@@ -1047,22 +1195,19 @@ function initWorkspace() {
         if (titleEl) {
             titleEl.textContent = deptObj
                 ? (IS_EN ? (deptObj.name_en || deptObj.name) : deptObj.name)
-                : (IS_EN ? 'All Departmental Reports' : 'Semua Laporan Departemen');
+                : (isReportsOverview()
+                    ? (IS_EN ? 'Department Overview' : 'Ringkasan Departemen')
+                    : (IS_EN ? 'All Departmental Reports' : 'Semua Laporan Departemen'));
         }
         if (subtitleEl) {
             subtitleEl.textContent = activeDept && deptObj
                 ? (deptObj.description || (IS_EN ? 'Focused report workspace & approval queue for this department.' : 'Ruang laporan, analitik, dan histori khusus departemen ini.'))
                 : (multiDept
-                    ? (IS_EN ? 'Select a department submenu below to focus on specific operational reports and analytics.' : 'Pilih submenu departemen di bawah agar laporan, grafik, dan histori tersusun per divisi.')
-                    : (IS_EN ? 'Department report authoring, workflow review, and archive.' : 'Penyusunan, pemeriksaan, dan arsip laporan departemen Anda.'));
+                    ? (isReportsOverview()
+                        ? (IS_EN ? 'Pick a department to see its reports, charts, and history.' : 'Pilih departemen untuk melihat laporan, grafik, dan historinya.')
+                        : (IS_EN ? 'Reports and history from every department.' : 'Daftar laporan dan histori seluruh departemen.'))
+                    : (IS_EN ? 'Department report review and archive.' : 'Pemeriksaan dan arsip laporan departemen Anda.'));
         }
-        if (statsEl) {
-            const actionPart = actionableCnt > 0
-                ? `<span class="text-slate-300">&bull;</span><span class="text-amber-700 font-semibold"><strong>${actionableCnt}</strong> ${IS_EN ? 'pending' : 'perlu aksi'}</span>`
-                : '';
-            statsEl.innerHTML = `<span class="text-slate-600"><strong class="text-navy">${scoped.length}</strong> ${IS_EN ? 'total' : 'laporan'}</span><span class="text-slate-300">&bull;</span><span class="text-emerald-700"><strong>${reviewedCnt}</strong> reviewed</span>${actionPart}`;
-        }
-
         const createBtn = document.getElementById('reports-dept-create-btn');
         const createLbl = document.getElementById('reports-dept-create-label');
         if (createBtn) {
@@ -1086,7 +1231,32 @@ function initWorkspace() {
         }
     }
 
+    // Klik menu induk: buka ringkasan semua departemen; kalau sudah di sana, lipat/buka submenu.
+    window.openReportsMenu = function () {
+        const onReports = !document.getElementById('tab-panel-reports')?.classList.contains('hidden');
+        if (onReports && !reportFilterState.dept && !reportFilterState.list) {
+            window.switchWorkspaceTab('reports', { toggleSubmenu: true });
+            return;
+        }
+        const hasSubmenu = !!document.getElementById('sidebar-reports-submenu');
+        if (!hasSubmenu) {
+            window.switchWorkspaceTab('reports');
+            return;
+        }
+        window.selectReportDepartment('');
+        window.switchWorkspaceTab('reports');
+        window.scrollTo({ top: 0 });
+    };
+
     window.selectReportDepartment = function (deptCode = '') {
+        if (deptCode === 'ENG' && hasPomec()) {
+            closeMobileSidebar();
+            window.switchWorkspaceTab('pomec');
+            window.scrollTo({ top: 0 });
+            return;
+        }
+        // "Semua Departemen" selalu kembali ke ringkasan yang bersih.
+        if (!deptCode) clearReportFilters();
         reportFilterState.dept = deptCode || '';
         const panelHidden = document.getElementById('tab-panel-reports')?.classList.contains('hidden');
         if (panelHidden) {
@@ -1111,6 +1281,7 @@ function initWorkspace() {
         const hasOption = Array.from(sel.options).some((o) => o.value === deptCode);
         if (!hasOption) return false;
         reportFilterState.dept = reportFilterState.dept === deptCode ? '' : deptCode;
+        reportFilterState.list = true;
         sel.value = reportFilterState.dept;
         return true;
     }
@@ -1285,6 +1456,9 @@ function initWorkspace() {
 
         // --- Department stacked horizontal bars ---
         const deptCanvas = document.getElementById('reports-chart-dept');
+        const deptBox = deptCanvas?.parentElement.parentElement;
+        deptBox?.classList.toggle('hidden', !!reportFilterState.dept);
+        deptBox?.nextElementSibling?.classList.toggle('lg:col-span-3', !!reportFilterState.dept);
         if (deptCanvas) {
             const deptMap = new Map();
             base.forEach((r) => {
@@ -1426,6 +1600,7 @@ function initWorkspace() {
 
     document.getElementById('report-dept-filter')?.addEventListener('change', (e) => {
         reportFilterState.dept = e.target.value;
+        reportFilterState.list = true;
         renderReportsTable();
         renderReportHistories();
     });
@@ -1457,6 +1632,7 @@ function initWorkspace() {
     });
 
     window.jumpToReportsPreset = function ({ status = null, period = null, scrollToHistory = false } = {}) {
+        reportFilterState.list = true;
         window.switchWorkspaceTab('reports');
         if (status !== null) {
             reportFilterState.status = status;
@@ -1477,7 +1653,15 @@ function initWorkspace() {
     };
 
     window.resetReportFilters = function () {
-        reportFilterState = { search: '', dept: '', period: '', date: '', status: 'all' };
+        clearReportFilters();
+        // Reset di daftar lengkap tetap di daftar, bukan melompat ke ringkasan.
+        reportFilterState.list = true;
+        renderReportsTable();
+        renderReportHistories();
+    };
+
+    function clearReportFilters() {
+        reportFilterState = { search: '', dept: '', period: '', date: '', status: 'all', list: false };
         historyActionFilter = '';
         const s = document.getElementById('report-search');
         const ts = document.getElementById('topbar-quick-search');
@@ -1492,9 +1676,7 @@ function initWorkspace() {
         if (dt) dt.value = '';
         if (ha) ha.value = '';
         applyReportStatusPills();
-        renderReportsTable();
-        renderReportHistories();
-    };
+    }
 
     // -------------------------------------------------------------------------
     // 4. Dynamic Per-Department Table Editor
@@ -1664,6 +1846,9 @@ function initWorkspace() {
     });
 
     window.openReportEditor = function (reportId = null, templateId = null) {
+        // Laporan POMEC diperbaiki dari detailnya (unggah ulang), bukan lewat form.
+        if (reportId && REPORTS_DATA.find((r) => r.id === reportId)?.pomec_import_id) return window.openReportDetail(reportId);
+        if (!boot.manualReports) return;
         showInlineError('editor-form-error', '');
         const select = document.getElementById('editor-template-select');
         document.getElementById('editor-report-id').value = reportId || '';
@@ -1775,6 +1960,8 @@ function initWorkspace() {
             if (data.report) upsertReportInState(data.report);
             window.closeModal('modal-report-editor');
             window.switchWorkspaceTab('reports');
+            // Dari ringkasan, langsung buka departemen laporan yang baru disimpan.
+            if (isReportsOverview() && data.report?.department?.code) window.selectReportDepartment(data.report.department.code);
         } catch {
             showInlineError('editor-form-error', T.networkError);
         } finally {
@@ -1812,7 +1999,8 @@ function initWorkspace() {
                                 <td class="py-3 px-4 font-mono-num text-slate-400">${idx + 1}</td>
                                 ${cols.map((c) => {
                                     let val = r[c.key] ?? '';
-                                    if (c.type === 'currency' && !isNaN(val)) val = 'Rp ' + Number(val).toLocaleString('id-ID');
+                                    if (c.type === 'date' && val) val = formatWitaDateLabel(val, IS_EN);
+                                    else if (c.type === 'currency' && val !== null && val !== '' && !isNaN(val)) val = 'Rp ' + Math.round(Number(val)).toLocaleString('id-ID');
                                     else if (c.type === 'number' && !isNaN(val)) val = Number(val).toLocaleString('id-ID');
                                     return `<td class="py-3 px-4 ${['number', 'currency'].includes(c.type) ? 'text-right font-mono-num font-medium whitespace-nowrap' : ''}">${escapeHtml(val)}</td>`;
                                 }).join('')}
@@ -1855,6 +2043,18 @@ function initWorkspace() {
             </div>
         ` : '';
 
+        // Laporan POMEC: isi dari Excel. Staf mengirim draft atau mengunggah ulang perbaikan.
+        const canInputRpt = CURRENT_USER.role === 'it_admin' || (CURRENT_USER.inputtableDepartmentIds || []).includes(rpt.department_id);
+        const pomecBtn = (action, label, tone) => `<button type="button" onclick="pomecReportAction(${rpt.id}, '${action}')" class="px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${tone}">${label}</button>`;
+        const pomecActions = rpt.pomec_import_id ? `
+            <div class="flex flex-wrap items-center gap-2 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <span class="text-xs text-slate-600 mr-auto">${IS_EN ? 'Data from the POMEC Excel upload.' : 'Data dari unggahan Excel POMEC.'}</span>
+                ${pomecBtn('view', IS_EN ? 'View in POMEC' : 'Lihat di POMEC', 'border border-slate-200 bg-white text-navy hover:bg-slate-100')}
+                ${canInputRpt && rpt.status === 'draft' ? pomecBtn('delete', IS_EN ? 'Delete Draft' : 'Hapus Draft', 'border border-rose-200 bg-white text-crimson-dark hover:bg-rose-50') : ''}
+                ${canInputRpt && rpt.status === 'draft' ? pomecBtn('submit', IS_EN ? 'Submit to HOD' : 'Kirim ke HOD', 'bg-navy hover:bg-navy-light text-white') : ''}
+                ${canInputRpt && rpt.status === 'returned' ? pomecBtn('reupload', IS_EN ? 'Re-upload Correction' : 'Unggah Ulang Perbaikan', 'bg-navy hover:bg-navy-light text-white') : ''}
+            </div>` : '';
+
         const stageOrder = { draft: 1, submitted: 2, in_review: 3, returned: 4, reviewed: 5 };
         const currentStep = stageOrder[rpt.status] || 1;
         const stepCls = (stepIdx, activeTone) => {
@@ -1888,6 +2088,7 @@ function initWorkspace() {
             ${rpt.review_note ? `<div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs"><strong class="text-navy">${T.reviewNotes}:</strong> ${escapeHtml(rpt.review_note)}</div>` : ''}
             ${rpt.attachment_name ? `<div class="text-xs"><a href="/reports/${rpt.id}/attachment" class="inline-flex items-center gap-1.5 font-semibold text-teal hover:underline"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>${T.downloadAttachment}: ${escapeHtml(rpt.attachment_name)}</a></div>` : ''}
 
+            ${pomecActions}
             ${hodReviewBox}
 
             <div class="border border-slate-200/80 rounded-2xl p-4 space-y-2">
@@ -1952,6 +2153,7 @@ function initWorkspace() {
             const data = await res.json();
             if (!res.ok) return window.showToast(extractErrorMessage(data, T.saveFailed), 'error');
             REPORTS_DATA = REPORTS_DATA.filter((r) => r.id !== id);
+            if (data.pomec_import_id) removePomecImport(data.pomec_import_id);
             renderReportsTable();
             refreshKpis();
             window.showToast(data.message, 'success');
@@ -1962,334 +2164,882 @@ function initWorkspace() {
     };
 
     // -------------------------------------------------------------------------
-    // 6. POMEC Filtering, Trend Bars, Batch History, Preview & Commit
+    // 6. POMEC: satu bulan + satu utilitas terpilih, unggah, preview & simpan
     // -------------------------------------------------------------------------
-    function renderPomecRecords() {
-        const tbody = document.getElementById('pomec-records-tbody');
-        const chartEl = document.getElementById('pomec-trend-bars');
-        if (!tbody) return;
+    const pomecRoot = document.getElementById('pomec-root');
+    // Dari PomecRecord::TYPES (label, satuan, ada biaya atau tidak).
+    const POMEC_TYPES = pomecRoot ? JSON.parse(pomecRoot.dataset.types) : {};
+    // Warna melekat pada utilitas; rincian memakai gradasi warna yang sama (lolos validator palet, terang & gelap).
+    const pomecColor = (type) => ({ electricity: '#D97706', water: isDarkTheme() ? '#3B82F6' : '#2563EB', gas: '#A21CAF', solar: '#059669' })[type];
+    const pomecShades = (type) => ({
+        electricity: isDarkTheme() ? ['#D97706', '#FCD34D'] : ['#D97706', '#92400E'],
+        water: isDarkTheme() ? ['#1D4ED8', '#60A5FA', '#DBEAFE'] : ['#7CB0F5', '#2563EB', '#16306E'],
+    })[type];
+    // Hari disebut menonjol kalau minimal 25% di atas rata-rata.
+    const POMEC_HIGH = 1.25;
+    // Gas dipakai per ganti tabung dan solar sesekali: per hari tidak terbaca, jadi digambar mingguan.
+    const POMEC_SPARSE = ['gas', 'solar'];
+    const pomecViewFor = (type) => (pomecView === 'day' && POMEC_SPARSE.includes(type) ? 'week' : pomecView);
+    const pomecPeriod = (view) => ({ day: IS_EN ? 'Daily' : 'Harian', week: IS_EN ? 'Weekly' : 'Mingguan', month: IS_EN ? 'Monthly' : 'Bulanan' })[view];
+    const pomecLabel = (type) => POMEC_TYPES[type]?.[IS_EN ? 'en' : 'id'] || type;
+    const pomecUnit = (type) => POMEC_TYPES[type]?.unit || '';
+    const pomecQty = (v) => Number(v || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+    const pomecRupiah = (v) => (v === null || v === undefined ? '-' : `Rp ${Math.round(Number(v)).toLocaleString('id-ID')}`);
+    const pomecSum = (rows, key) => rows.reduce((s, r) => s + Number(r[key] || 0), 0);
+    const pomecMonthOf = (rec) => formatWitaIsoDate(rec.reading_date).slice(0, 7);
+    const pomecMonthName = (month) => (month
+        ? new Intl.DateTimeFormat(IS_EN ? 'en-GB' : 'id-ID', { timeZone: 'Asia/Makassar', month: 'long', year: 'numeric' }).format(new Date(`${month}-15T12:00:00+08:00`))
+        : '-');
 
-        const q = pomecSearchQuery.trim().toLowerCase();
-        const filtered = POMEC_RECORDS.filter((rec) => {
-            if (pomecFilterType !== 'all' && rec.utility_type !== pomecFilterType) return false;
-            const isoDate = formatWitaIsoDate(rec.reading_date);
-            if (pomecMonthFilter && !isoDate.startsWith(pomecMonthFilter) && rec.import?.period_month !== pomecMonthFilter) return false;
-            if (q) {
-                const dateLabel = formatWitaDateLabel(rec.reading_date, IS_EN);
-                const hay = `${isoDate} ${dateLabel} ${rec.utility_type || ''} ${rec.meter_name || ''} ${rec.notes || ''}`.toLowerCase();
-                if (!hay.includes(q)) return false;
-            }
-            return true;
-        });
+    // { 'YYYY-MM-DD': total pemakaian } dari sekumpulan baris.
+    function pomecDaily(rows) {
+        return rows.reduce((days, r) => {
+            const d = formatWitaIsoDate(r.reading_date);
+            days[d] = (days[d] || 0) + Number(r.total_usage || 0);
+            return days;
+        }, {});
+    }
 
-        const recCountEl = document.getElementById('pomec-record-count');
-        if (recCountEl) recCountEl.textContent = `${filtered.length}/${POMEC_RECORDS.length}`;
-        const hasPomecFilter = !!(q || pomecMonthFilter || pomecFilterType !== 'all');
-        document.getElementById('pomec-reset-btn')?.classList.toggle('hidden', !hasPomecFilter);
+    function pomecDailyAverage(rows) {
+        const days = Object.keys(pomecDaily(rows)).length;
+        return days ? pomecSum(rows, 'total_usage') / days : 0;
+    }
 
-        if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-400">${IS_EN ? 'No utility records match your filter.' : 'Tidak ada data utilitas yang cocok.'}</td></tr>`;
-            renderPaginationFooter('pomec-pagination', tableStates.pomec, 0, 1, 0, 0, renderPomecRecords);
+    function pomecPrevMonth(month) {
+        const [y, m] = month.split('-').map(Number);
+        return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    }
+
+    // Dibandingkan per hari supaya bulan yang belum lengkap tidak terlihat "turun".
+    function pomecTrend(rows, type) {
+        const prev = pomecPrevMonth(pomecMonth);
+        const before = pomecDailyAverage(POMEC_RECORDS.filter((r) => r.utility_type === type && pomecMonthOf(r) === prev));
+        const name = pomecMonthName(prev);
+        // Tanpa data bulan lalu tidak ada yang perlu ditampilkan.
+        if (!before) return { text: '', tone: '' };
+        const pct = Math.round(((pomecDailyAverage(rows) - before) / before) * 1000) / 10;
+        if (!pct) {
+            return { text: IS_EN ? `Same per day as ${name}` : `Sama per hari dengan ${name}`, tone: 'text-slate-500' };
+        }
+        const up = pct > 0;
+        const word = IS_EN ? (up ? 'up' : 'down') : (up ? 'naik' : 'turun');
+        return {
+            text: `${up ? '▲' : '▼'} ${word} ${pomecQty(Math.abs(pct))}% ${IS_EN ? 'per day vs' : 'per hari dari'} ${name}`,
+            tone: up ? 'text-crimson-dark' : 'text-emerald-700',
+        };
+    }
+
+    function renderPomecStats(rows) {
+        const unit = pomecUnit(pomecType);
+        const stats = document.getElementById('pomec-stats');
+        const meters = document.getElementById('pomec-meters');
+        stats.classList.toggle('hidden', !rows.length);
+
+        const days = Object.entries(pomecDaily(rows));
+        const total = pomecSum(rows, 'total_usage');
+        const [peakDate, peak] = days.reduce((max, day) => (day[1] > max[1] ? day : max), ['', -1]);
+        const wbpShare = total ? Math.round((pomecSum(rows, 'wbp_value') / total) * 1000) / 10 : 0;
+        const items = [[
+            IS_EN ? 'Monthly total' : 'Total bulan ini',
+            `${pomecQty(total)} ${unit}`,
+            pomecType === 'electricity'
+                ? `${IS_EN ? 'Peak hours (WBP)' : 'Beban puncak (WBP)'} ${pomecQty(wbpShare)}%`
+                : `${days.length} ${IS_EN ? 'days recorded' : 'hari tercatat'}`,
+        ]];
+
+        if (POMEC_TYPES[pomecType].cost) {
+            const priced = rows.filter((r) => r.cost !== null);
+            const cost = pomecSum(priced, 'cost');
+            const usage = pomecSum(priced, 'total_usage');
+            items.push([
+                IS_EN ? 'Cost before tax' : 'Biaya sebelum pajak',
+                priced.length ? pomecRupiah(cost) : '-',
+                priced.length && usage ? `± ${pomecRupiah(cost / usage)} ${IS_EN ? 'per' : 'per'} ${unit}` : (IS_EN ? 'Not in this data' : 'Tidak ada di data ini'),
+            ]);
         } else {
-            const pageItems = paginateAndSort(
-                filtered,
-                tableStates.pomec,
-                `${pomecFilterType}|${pomecMonthFilter}|${q}`,
-                {
-                    reading_date: (rec) => formatWitaIsoDate(rec.reading_date) || '',
-                    utility_type: (rec) => rec.utility_type || '',
-                    meter_name: (rec) => rec.meter_name || '',
-                    total_usage: (rec) => Number(rec.total_usage || 0),
-                },
-                'pomec-pagination',
-                renderPomecRecords
-            );
-
-            tbody.innerHTML = pageItems.map((rec) => {
-                const dateStr = formatWitaDateLabel(rec.reading_date, IS_EN);
-                const isElec = rec.utility_type === 'electricity';
-                const detailVal = isElec
-                    ? `${Number(rec.lwbp_value || 0).toLocaleString('id-ID')} / ${Number(rec.wbp_value || 0).toLocaleString('id-ID')}`
-                    : `${Number(rec.water_m3 || 0).toLocaleString('id-ID')} m³`;
-                const totalVal = isElec
-                    ? `${Number(rec.total_usage || 0).toLocaleString('id-ID')} kWh`
-                    : `${Number(rec.total_usage || 0).toLocaleString('id-ID')} m³`;
-
-                return `<tr class="hover:bg-slate-50/70 transition">
-                    <td class="py-3.5 px-5 font-mono-num text-slate-600 whitespace-nowrap">${escapeHtml(dateStr)}</td>
-                    <td class="py-3.5 px-5 whitespace-nowrap">
-                        <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${isElec ? 'bg-amber-50 text-amber-700 border border-amber-200/70' : 'bg-cyan-50 text-teal border border-cyan-200/70'}">
-                            ${escapeHtml(rec.utility_type.toUpperCase())}
-                        </span>
-                    </td>
-                    <td class="py-3.5 px-5 font-semibold text-navy whitespace-nowrap">${escapeHtml(rec.meter_name)}</td>
-                    <td class="py-3.5 px-5 text-right font-mono-num text-slate-600 whitespace-nowrap">${detailVal}</td>
-                    <td class="py-3.5 px-5 text-right font-mono-num font-bold text-navy whitespace-nowrap">${totalVal}</td>
-                    <td class="py-3.5 px-5 text-slate-500 min-w-[160px]">${escapeHtml(rec.notes || '-')}</td>
-                </tr>`;
-            }).join('');
+            const used = days.filter(([, v]) => v > 0).length;
+            items.push([IS_EN ? 'Days with usage' : 'Hari ada pemakaian', `${used} ${IS_EN ? 'days' : 'hari'}`, `${days.length - used} ${IS_EN ? 'days with none' : 'hari tanpa pemakaian'}`]);
         }
 
-        renderPomecCharts(filtered);
-    }
+        const trend = rows.length ? pomecTrend(rows, pomecType) : { text: '', tone: '' };
+        items.push(
+            [IS_EN ? 'Average per day' : 'Rata-rata per hari', `${pomecQty(pomecDailyAverage(rows))} ${unit}`, trend.text, trend.tone],
+            [IS_EN ? 'Highest day' : 'Hari tertinggi', `${pomecQty(peak)} ${unit}`, peakDate ? formatWitaDateLabel(peakDate, IS_EN) : ''],
+        );
 
-    function renderPomecCharts(filtered) {
-        const trendCanvas = document.getElementById('pomec-chart-trend');
-        const splitCanvas = document.getElementById('pomec-chart-split');
-        if (!trendCanvas && !splitCanvas) return;
+        stats.innerHTML = items.map(([label, value, hint, tone = 'text-slate-400']) => `<div>
+            <dt class="text-[11px] text-slate-500">${label}</dt>
+            <dd class="text-base font-heading font-bold font-mono-num text-navy">${value}</dd>
+            <dd class="text-[11px] ${tone}">${hint}</dd>
+        </div>`).join('');
 
-        // Group filtered records by WITA ISO date ascending
-        const byDate = new Map();
-        filtered.forEach((r) => {
-            const iso = formatWitaIsoDate(r.reading_date);
-            if (!iso) return;
-            if (!byDate.has(iso)) byDate.set(iso, { lwbp: 0, wbp: 0, water: 0 });
-            const bucket = byDate.get(iso);
-            if (r.utility_type === 'electricity') {
-                bucket.lwbp += Number(r.lwbp_value || 0);
-                bucket.wbp += Number(r.wbp_value || 0);
-            } else {
-                bucket.water += Number(r.water_m3 || r.total_usage || 0);
-            }
+        // Rincian per meter hanya berguna kalau meternya lebih dari satu.
+        const byMeter = [...new Set(rows.map((r) => r.meter_name))].sort().map((name) => {
+            const own = rows.filter((r) => r.meter_name === name);
+            return { name, usage: pomecSum(own, 'total_usage'), cost: own.some((r) => r.cost !== null) ? pomecSum(own, 'cost') : null };
         });
-
-        const sortedDays = Array.from(byDate.keys()).sort().slice(-14);
-        const rangeEl = document.getElementById('pomec-chart-range');
-        if (rangeEl) {
-            rangeEl.textContent = sortedDays.length > 0
-                ? `${formatWitaDateLabel(sortedDays[0], IS_EN)} – ${formatWitaDateLabel(sortedDays[sortedDays.length - 1], IS_EN)}`
-                : '-';
-        }
-
-        if (trendCanvas) {
-            upsertChart(trendCanvas, {
-                type: 'bar',
-                data: {
-                    labels: sortedDays.map((d) => new Intl.DateTimeFormat(IS_EN ? 'en-GB' : 'id-ID', { timeZone: 'Asia/Makassar', day: '2-digit', month: 'short' }).format(new Date(`${d}T12:00:00+08:00`))),
-                    datasets: [
-                        {
-                            label: 'LWBP (kWh)',
-                            data: sortedDays.map((d) => Math.round(byDate.get(d).lwbp)),
-                            backgroundColor: chartLwbpBarColor(),
-                            borderRadius: { topLeft: 4, topRight: 4 },
-                            stack: 'elec',
-                            yAxisID: 'y',
-                            barPercentage: 0.65,
-                            categoryPercentage: 0.72,
-                            maxBarThickness: 26,
-                            order: 2,
-                        },
-                        {
-                            label: 'WBP (kWh)',
-                            data: sortedDays.map((d) => Math.round(byDate.get(d).wbp)),
-                            backgroundColor: '#F59E0B',
-                            borderRadius: { topLeft: 4, topRight: 4 },
-                            stack: 'elec',
-                            yAxisID: 'y',
-                            barPercentage: 0.65,
-                            categoryPercentage: 0.72,
-                            maxBarThickness: 26,
-                            order: 2,
-                        },
-                        {
-                            type: 'line',
-                            label: IS_EN ? 'Water (m³)' : 'Air (m³)',
-                            data: sortedDays.map((d) => Number(byDate.get(d).water.toFixed(1))),
-                            borderColor: '#1E6B7B',
-                            backgroundColor: makeChartAreaGradient('rgba(30, 107, 123, 0.16)', 'rgba(30, 107, 123, 0.0)'),
-                            fill: true,
-                            borderWidth: 2.25,
-                            pointRadius: 3,
-                            pointBackgroundColor: '#1E6B7B',
-                            pointBorderColor: chartPointBorderColor(),
-                            pointBorderWidth: 1.5,
-                            pointHoverRadius: 5.5,
-                            pointHoverBorderWidth: 2,
-                            tension: 0.38,
-                            yAxisID: 'y1',
-                            order: 0,
-                        },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: chartStagger(18, 200),
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { position: 'top', align: 'end', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'circle', font: { size: 11, weight: '600' } } },
-                    },
-                    scales: {
-                        x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
-                        y: {
-                            stacked: true,
-                            position: 'left',
-                            beginAtZero: true,
-                            grid: { color: chartGridColor() },
-                            border: { display: false },
-                            ticks: { font: { size: 10 }, callback: (v) => `${Number(v).toLocaleString('id-ID')} kWh` },
-                        },
-                        y1: {
-                            position: 'right',
-                            beginAtZero: true,
-                            grid: { drawOnChartArea: false },
-                            border: { display: false },
-                            ticks: { font: { size: 10 }, callback: (v) => `${v} m³` },
-                        },
-                    },
-                },
-            });
-        }
-
-        if (splitCanvas) {
-            const elecRows = filtered.filter((r) => r.utility_type === 'electricity');
-            const totalLwbp = elecRows.reduce((s, r) => s + Number(r.lwbp_value || 0), 0);
-            const totalWbp = elecRows.reduce((s, r) => s + Number(r.wbp_value || 0), 0);
-            const sumElec = totalLwbp + totalWbp;
-            const lwbpPct = sumElec > 0 ? Math.round((totalLwbp / sumElec) * 100) : 0;
-            const wbpPct = sumElec > 0 ? 100 - lwbpPct : 0;
-
-            const totEl = document.getElementById('pomec-chart-elec-total');
-            if (totEl) totEl.textContent = `${Math.round(sumElec).toLocaleString('id-ID')} kWh`;
-            const ctrEl = document.getElementById('pomec-chart-split-center');
-            if (ctrEl) ctrEl.textContent = `${lwbpPct}%`;
-
-            const hasElec = sumElec > 0;
-            upsertChart(splitCanvas, {
-                type: 'doughnut',
-                data: {
-                    labels: ['LWBP (kWh)', 'WBP (kWh)'],
-                    datasets: [{
-                        data: hasElec ? [Math.round(totalLwbp), Math.round(totalWbp)] : [1],
-                        backgroundColor: hasElec ? [chartLwbpBarColor(), '#F59E0B'] : chartEmptyTrackColor(),
-                        borderWidth: 0,
-                        borderRadius: hasElec ? 4 : 0,
-                        spacing: hasElec ? 2 : 0,
-                        hoverOffset: hasElec ? 5 : 0,
-                    }],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '76%',
-                    rotation: -90,
-                    animation: doughnutAnimation(),
-                    plugins: { legend: { display: false }, tooltip: { enabled: hasElec } },
-                },
-            });
-
-            const legEl = document.getElementById('pomec-chart-split-legend');
-            if (legEl) {
-                legEl.innerHTML = `
-                    <div class="rounded-lg bg-slate-50 border border-slate-200/70 px-2.5 py-1.5">
-                        <div class="flex items-center gap-1.5 text-slate-500"><span class="w-2 h-2 rounded-full bg-navy"></span>LWBP (${lwbpPct}%)</div>
-                        <div class="font-bold text-navy mt-0.5">${Math.round(totalLwbp).toLocaleString('id-ID')} kWh</div>
-                    </div>
-                    <div class="rounded-lg bg-amber-50/60 border border-amber-200/70 px-2.5 py-1.5">
-                        <div class="flex items-center gap-1.5 text-amber-800"><span class="w-2 h-2 rounded-full bg-amber-500"></span>WBP (${wbpPct}%)</div>
-                        <div class="font-bold text-amber-900 mt-0.5">${Math.round(totalWbp).toLocaleString('id-ID')} kWh</div>
-                    </div>
-                `;
-            }
-        }
-    }
-
-    function renderPomecImports() {
-        const tbody = document.getElementById('pomec-imports-tbody');
-        const countEl = document.getElementById('pomec-batch-count');
-        if (countEl) countEl.textContent = POMEC_IMPORTS.length;
-        if (!tbody) return;
-
-        const q = pomecSearchQuery.trim().toLowerCase();
-        const filtered = POMEC_IMPORTS.filter((imp) => {
-            if (pomecFilterType !== 'all' && imp.utility_type !== pomecFilterType) return false;
-            if (pomecMonthFilter && imp.period_month !== pomecMonthFilter) return false;
-            if (q && !`${imp.batch_code || ''} ${imp.original_filename || ''} ${imp.uploader?.name || ''} ${imp.period_month || ''}`.toLowerCase().includes(q)) return false;
-            return true;
-        });
-
-        if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-400">${IS_EN ? 'No POMEC import batches match your filter.' : 'Tidak ada riwayat batch impor POMEC yang sesuai.'}</td></tr>`;
-            return;
-        }
-
-        tbody.innerHTML = filtered.map((imp) => {
-            const isElec = imp.utility_type === 'electricity';
-            const unit = isElec ? 'kWh' : 'm³';
-            return `<tr class="hover:bg-slate-50/70 transition">
-                <td class="py-3.5 px-5 font-mono-num font-semibold text-navy whitespace-nowrap">${escapeHtml(imp.batch_code)}</td>
-                <td class="py-3.5 px-5 whitespace-nowrap">
-                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${isElec ? 'bg-amber-50 text-amber-700' : 'bg-cyan-50 text-teal'}">${escapeHtml(imp.utility_type.toUpperCase())}</span>
-                    <span class="font-mono-num text-slate-500 ml-1.5">${escapeHtml(imp.period_month)}</span>
-                </td>
-                <td class="py-3.5 px-5 text-slate-700 min-w-[200px]">${escapeHtml(imp.original_filename)}</td>
-                <td class="py-3.5 px-5 font-mono-num text-[11px] text-slate-500 whitespace-nowrap">${escapeHtml((imp.file_hash_sha256 || '').slice(0, 24))}...</td>
-                <td class="py-3.5 px-5 text-right font-mono-num font-semibold text-navy whitespace-nowrap">${imp.total_rows} ${T.rows} &bull; ${Number(imp.total_usage || 0).toLocaleString('id-ID')} ${unit}</td>
-                <td class="py-3.5 px-5 text-slate-600 whitespace-nowrap">
-                    <div>${escapeHtml(imp.uploader?.name || '-')}</div>
-                    <div class="text-[10px] font-mono-num text-slate-400 mt-0.5">${escapeHtml(formatWita(imp.committed_at, true))}</div>
-                </td>
-            </tr>`;
+        meters.classList.toggle('hidden', byMeter.length < 2);
+        // Warna bar meter air sama dengan warnanya di grafik.
+        const shades = pomecType === 'water' ? pomecShades(pomecType) : [pomecColor(pomecType)];
+        meters.innerHTML = byMeter.map((m, i) => {
+            const pct = total ? Math.round((m.usage / total) * 1000) / 10 : 0;
+            return `<div class="space-y-1">
+                <div class="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
+                    <span class="font-semibold text-navy">${escapeHtml(m.name)} <span class="font-normal text-slate-400">${pomecQty(pct)}%</span></span>
+                    <span class="font-mono-num text-slate-600">${pomecQty(m.usage)} ${unit}${m.cost === null ? '' : ` · ${pomecRupiah(m.cost)}`}</span>
+                </div>
+                <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full" style="width: ${pct}%; background-color: ${shades[i % shades.length]}"></div></div>
+            </div>`;
         }).join('');
     }
 
-    document.getElementById('pomec-file-input')?.addEventListener('change', (e) => {
-        const label = document.getElementById('pomec-file-label');
-        const file = e.target.files?.[0];
-        if (label) {
-            label.textContent = file
-                ? `${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB)`
-                : (IS_EN ? 'Choose .xlsx or .csv file' : 'Pilih file .xlsx atau .csv');
+    function pomecMonths() {
+        return [...new Set(POMEC_RECORDS.map(pomecMonthOf))].sort().reverse();
+    }
+
+    const pomecReportOf = (importId) => REPORTS_DATA.find((r) => r.pomec_import_id === importId);
+    const POMEC_STATUS = {
+        draft: [IS_EN ? 'Draft' : 'Draft', 'bg-slate-100 text-slate-600 border-slate-200'],
+        submitted: [IS_EN ? 'Awaiting HOD' : 'Menunggu HOD', 'bg-amber-50 text-amber-800 border-amber-200'],
+        in_review: [IS_EN ? 'In review' : 'Diperiksa', 'bg-cyan-50 text-teal border-cyan-200'],
+        returned: [IS_EN ? 'Returned' : 'Dikembalikan', 'bg-rose-50 text-crimson-dark border-rose-200'],
+        reviewed: [IS_EN ? 'Approved' : 'Disetujui', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+    };
+    const pomecStatusBadge = (status) => {
+        const [label, tone] = POMEC_STATUS[status] || [status || '-', 'bg-slate-100 text-slate-600 border-slate-200'];
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-semibold whitespace-nowrap ${tone}">${escapeHtml(label)}</span>`;
+    };
+    const pomecUnitHtml = (type) => `<span class="text-slate-400 font-normal">${escapeHtml(pomecUnit(type))}</span>`;
+
+    // Buang batch (dan barisnya) dari tampilan setelah dihapus atau diganti unggahan ulang.
+    function removePomecImport(importId) {
+        POMEC_RECORDS = POMEC_RECORDS.filter((r) => r.pomec_import_id !== importId);
+        POMEC_IMPORTS = POMEC_IMPORTS.filter((i) => i.id !== importId);
+        renderPomec();
+        renderPomecImports();
+    }
+
+    // Aksi dari modal detail laporan POMEC.
+    window.pomecReportAction = async function (reportId, action) {
+        const rpt = REPORTS_DATA.find((r) => r.id === reportId);
+        const imp = POMEC_IMPORTS.find((i) => i.id === rpt?.pomec_import_id);
+        if (!rpt) return;
+        if (action === 'view' || action === 'reupload') {
+            window.closeModal('modal-report-detail');
+            window.switchWorkspaceTab('pomec');
+            if (imp) {
+                pomecType = imp.utility_type;
+                pomecMonth = imp.period_month;
+                renderPomec();
+            }
+            window.scrollTo({ top: 0 });
+            if (action === 'reupload') openPomecUpload(rpt);
+            return;
+        }
+        if (action === 'delete') {
+            const ok = window.confirm(IS_EN
+                ? `Delete draft ${rpt.report_code}? Its uploaded data is removed from the charts.`
+                : `Hapus draft ${rpt.report_code}? Data unggahannya ikut hilang dari grafik.`);
+            if (!ok) return;
+        }
+        try {
+            const res = await fetch(`/reports/${reportId}${action === 'submit' ? '/submit' : ''}`, {
+                method: action === 'submit' ? 'POST' : 'DELETE',
+                headers: { 'X-CSRF-TOKEN': CSRF_TOKEN, Accept: 'application/json' },
+            });
+            const data = await res.json();
+            if (!res.ok) return window.showToast(extractErrorMessage(data, T.saveFailed), 'error');
+            window.showToast(data.message, 'success');
+            if (action === 'submit') {
+                upsertReportInState(data.report);
+                window.openReportDetail(reportId);
+            } else {
+                REPORTS_DATA = REPORTS_DATA.filter((r) => r.id !== reportId);
+                removePomecImport(data.pomec_import_id);
+                renderReportsTable();
+                refreshKpis();
+                window.closeModal('modal-report-detail');
+            }
+        } catch {
+            window.showToast(T.networkError, 'error');
+        }
+    };
+
+    // Status unggahan harian: tanggal terakhir per utilitas dibanding kemarin (WITA).
+    function renderPomecFreshness() {
+        const box = document.getElementById('pomec-freshness');
+        if (!box) return;
+        const dayNo = (iso) => {
+            const [y, m, d] = iso.split('-').map(Number);
+            return Date.UTC(y, m - 1, d) / 864e5;
+        };
+        const yesterday = dayNo(formatWitaIsoDate(new Date())) - 1;
+        // Antrean laporan: satu ringkasan yang bisa diklik, bukan diulang per utilitas.
+        const queue = [
+            ['submitted', IS_EN ? 'awaiting HOD' : 'menunggu HOD', 'bg-amber-50 text-amber-800 border-amber-200', ['submitted', 'in_review']],
+            ['returned', IS_EN ? 'returned' : 'dikembalikan', 'bg-rose-50 text-crimson-dark border-rose-200', ['returned']],
+            ['draft', IS_EN ? 'in draft' : 'masih draft', 'bg-slate-50 text-slate-600 border-slate-200', ['draft']],
+        ].map(([filter, label, tone, statuses]) => {
+            const n = POMEC_IMPORTS.filter((imp) => statuses.includes(pomecReportOf(imp.id)?.status)).length;
+            return n ? `<button type="button" data-pomec-queue="${filter}" class="px-2.5 py-1 rounded-full border font-semibold transition hover:opacity-80 cursor-pointer ${tone}">${n} ${IS_EN ? 'reports' : 'laporan'} ${label}</button>` : '';
+        }).join('');
+        box.innerHTML = `<span class="font-semibold text-slate-600">${IS_EN ? 'Latest update' : 'Pembaruan terakhir'}</span>` + Object.keys(POMEC_TYPES).map((type) => {
+            const latest = POMEC_RECORDS.reduce((max, r) => (r.utility_type === type && r.reading_date > max ? r.reading_date : max), '');
+            const late = latest ? yesterday - dayNo(latest) : 0;
+            // Data tetap tampil di grafik; titik kuning = ada data yang belum disetujui HOD.
+            const pending = POMEC_RECORDS.some((r) => r.utility_type === type && pomecReportOf(r.pomec_import_id)?.status !== 'reviewed');
+            const dot = !latest ? 'bg-slate-300' : (late > 0 || pending ? 'bg-amber-500' : 'bg-emerald-500');
+            let note = escapeHtml(latest ? formatWitaDateLabel(latest, IS_EN) : (IS_EN ? 'none yet' : 'belum ada'));
+            if (late > 0) note += ` · <span class="text-amber-700 font-semibold">${IS_EN ? `${late} day(s) behind` : `tertinggal ${late} hari`}</span>`;
+            const title = pending ? ` title="${IS_EN ? 'Some data not yet approved by HOD' : 'Ada data yang belum disetujui HOD'}"` : '';
+            return `<span class="inline-flex items-center gap-1.5"${title}><span class="w-1.5 h-1.5 rounded-full ${dot}" aria-hidden="true"></span><span class="font-semibold text-navy">${escapeHtml(pomecLabel(type))}</span>${note}</span>`;
+        }).join('') + (queue ? `<span class="flex flex-wrap gap-1.5 ml-auto">${queue}</span>` : '');
+    }
+
+    function renderPomec() {
+        if (!pomecRoot) return;
+        renderPomecFreshness();
+        const months = pomecMonths();
+        if (!months.includes(pomecMonth)) pomecMonth = months[0] || '';
+
+        const select = document.getElementById('pomec-month-filter');
+        select.innerHTML = months.length
+            ? months.map((m) => `<option value="${m}">${escapeHtml(pomecMonthName(m))}</option>`).join('')
+            : `<option value="">${IS_EN ? 'No data yet' : 'Belum ada data'}</option>`;
+        select.value = pomecMonth;
+
+        const monthRecords = POMEC_RECORDS.filter((r) => pomecMonthOf(r) === pomecMonth);
+        const [year, monthNo] = (pomecMonth || '0-0').split('-').map(Number);
+        const daysInMonth = new Date(year, monthNo, 0).getDate();
+        document.querySelectorAll('.pomec-tab').forEach((tab) => {
+            tab.setAttribute('aria-pressed', tab.dataset.pomecOpen === pomecType ? 'true' : 'false');
+        });
+
+        // Tombol mengikuti grafik yang benar-benar tampil: gas dan solar tidak punya grafik harian.
+        document.querySelectorAll('[data-pomec-view]').forEach((btn) => {
+            btn.setAttribute('aria-pressed', btn.dataset.pomecView === pomecViewFor(pomecType) ? 'true' : 'false');
+            btn.disabled = btn.dataset.pomecView === 'day' && POMEC_SPARSE.includes(pomecType);
+            btn.title = btn.disabled ? (IS_EN ? 'Gas and diesel are charted per week' : 'Gas dan solar digambar per minggu') : '';
+        });
+
+        const showAll = pomecType === 'all';
+        document.getElementById('pomec-overview').classList.toggle('hidden', !showAll);
+        document.getElementById('pomec-detail').classList.toggle('hidden', showAll);
+        if (showAll) {
+            renderPomecOverview(monthRecords, daysInMonth);
+            return;
+        }
+
+        const rows = monthRecords.filter((r) => r.utility_type === pomecType);
+        document.getElementById('pomec-detail-title').textContent = `${pomecLabel(pomecType)} · ${pomecMonthName(pomecMonth)}`;
+        const usageTitle = {
+            day: IS_EN ? 'Daily usage' : 'Pemakaian harian',
+            week: IS_EN ? 'Weekly usage' : 'Pemakaian mingguan',
+            month: IS_EN ? 'Monthly usage' : 'Pemakaian bulanan',
+        }[pomecViewFor(pomecType)];
+        document.getElementById('pomec-detail-note').textContent = `${usageTitle} (${pomecUnit(pomecType)})`;
+        ['excel', 'pdf'].forEach((format) => {
+            const link = document.getElementById(`pomec-export-${format}`);
+            link.href = link.dataset.href.replace('__type__', pomecType) + (pomecMonth ? `?period_month=${pomecMonth}` : '');
+        });
+
+        renderPomecStats(rows);
+        renderPomecRows();
+        renderPomecChart(rows);
+    }
+
+    // Tabel rincian harian (TanStack): satuan di kepala kolom, kolom meter/biaya hanya bila relevan.
+    let pomecRecordsTable;
+    let pomecRecordsKey = '';
+    let pomecMultiMeter = false;
+    const dash = '<span class="text-slate-300">—</span>';
+
+    function renderPomecRows() {
+        pomecRecordsTable ??= createDataTable({
+            tableId: 'pomec-records-table',
+            pagerId: 'pomec-pagination',
+            sorting: [{ id: 'reading_date', desc: true }],
+            empty: () => (IS_EN ? 'No data for this month yet.' : 'Belum ada data untuk bulan ini.'),
+            columns: [
+                { id: 'reading_date', header: () => (IS_EN ? 'Date' : 'Tanggal'), accessor: (r) => r.reading_date, tdClass: 'font-mono-num text-slate-600 whitespace-nowrap', cell: (r) => escapeHtml(formatWitaDateLabel(r.reading_date, IS_EN)) },
+                { id: 'meter_name', header: 'Meter', accessor: (r) => r.meter_name, visible: () => pomecMultiMeter, tdClass: 'font-medium text-navy whitespace-nowrap', cell: (r) => escapeHtml(r.meter_name) },
+                {
+                    id: 'total_usage',
+                    header: () => `${IS_EN ? 'Usage' : 'Pemakaian'} (${pomecUnit(pomecType)})`,
+                    accessor: (r) => Number(r.total_usage || 0),
+                    align: 'right',
+                    tdClass: 'font-mono-num whitespace-nowrap',
+                    cell: (r) => `<span class="font-semibold text-navy">${pomecQty(r.total_usage)}</span>${r.utility_type === 'electricity' ? `<div class="text-[10px] text-slate-500">LWBP ${pomecQty(r.lwbp_value)} · WBP ${pomecQty(r.wbp_value)}</div>` : ''}`,
+                },
+                {
+                    id: 'cost',
+                    header: () => (IS_EN ? 'Cost before tax (IDR)' : 'Biaya sebelum pajak (Rp)'),
+                    accessor: (r) => (r.cost === null ? -1 : Number(r.cost)),
+                    align: 'right',
+                    visible: () => !!POMEC_TYPES[pomecType]?.cost,
+                    tdClass: 'font-mono-num text-slate-600 whitespace-nowrap',
+                    cell: (r) => (r.cost === null ? dash : Math.round(Number(r.cost)).toLocaleString('id-ID')),
+                },
+                { id: 'notes', header: () => (IS_EN ? 'Notes' : 'Catatan'), tdClass: 'text-slate-500 min-w-[160px]', cell: (r) => (r.notes ? escapeHtml(r.notes) : dash) },
+            ],
+        });
+        if (!pomecRecordsTable) return;
+
+        // Urut meter dulu: pengurutan stabil menjaga baris pada tanggal yang sama tetap berurutan.
+        const rows = POMEC_RECORDS.filter((r) => r.utility_type === pomecType && pomecMonthOf(r) === pomecMonth)
+            .sort((a, b) => a.meter_name.localeCompare(b.meter_name));
+        pomecMultiMeter = new Set(rows.map((r) => r.meter_name)).size > 1;
+        const key = `${pomecType}|${pomecMonth}`;
+        pomecRecordsTable.setData(rows, { resetPage: key !== pomecRecordsKey });
+        pomecRecordsKey = key;
+    }
+
+    function pomecBarOptions(buckets, format, legend, ticks, view) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: chartStagger(10, 200),
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: legend,
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                        boxWidth: 8,
+                        boxHeight: 8,
+                        usePointStyle: true,
+                        font: { size: 11, weight: '600' },
+                    },
+                },
+                tooltip: {
+                    filter: (item) => item.dataset.type !== 'line',
+                    // Footer berisi perbandingan rata-rata, jadi harus tetap mudah dibaca.
+                    footerColor: '#CBD5E1',
+                    callbacks: {
+                        title: (items) => (items.length ? buckets[items[0].dataIndex].title : ''),
+                        label: (item) => `${item.dataset.label}: ${format(item.raw)}`,
+                        footer: (items) => {
+                            if (!items.length) return '';
+                            const datasets = items[0].chart.data.datasets;
+                            const average = datasets.find((d) => d.type === 'line')?.data[0];
+                            const total = items.reduce((sum, item) => sum + Number(item.raw || 0), 0);
+                            const lines = datasets.filter((d) => d.type !== 'line').length > 1 ? [`Total: ${format(total)}`] : [];
+                            const { days } = buckets[items[0].dataIndex];
+                            if (average) {
+                                const diff = Math.round((total / average - 1) * 100);
+                                lines.push(diff === 0
+                                    ? (IS_EN ? 'Same as average' : 'Sama dengan rata-rata')
+                                    : `${Math.abs(diff)}% ${diff > 0 ? (IS_EN ? 'above' : 'di atas') : (IS_EN ? 'below' : 'di bawah')} ${IS_EN ? 'average' : 'rata-rata'}`);
+                                lines.push(`${IS_EN ? 'Average' : 'Rata-rata'}: ${format(average)}`);
+                            } else if (view !== 'day' && days) {
+                                // Per hari supaya minggu atau bulan yang belum penuh tetap bisa dibandingkan.
+                                lines.push(`${IS_EN ? 'Per day' : 'Per hari'}: ${format(total / days)} (${days} ${IS_EN ? 'days' : 'hari'})`);
+                            }
+                            return lines;
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 }, maxRotation: 0, autoSkipPadding: 8 } },
+                y: { stacked: true, beginAtZero: true, grid: { color: chartGridColor() }, border: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: ticks, callback: (v) => format(v, true) } },
+            },
+        };
+    }
+
+    function pomecBar(label, data, color, stacked = false) {
+        // Celah 2px antar tumpukan.
+        return { label, data, backgroundColor: color, borderRadius: 3, maxBarThickness: 22, borderColor: chartPointBorderColor(), borderWidth: { top: stacked ? 2 : 0 } };
+    }
+
+    // Angka di atas batang yang perlu diperhatikan: hari menonjol atau bulan terpilih.
+    const pomecMarker = (marks, format) => ({
+        id: 'pomecMarker',
+        afterDatasetsDraw(chart) {
+            const { ctx, chartArea } = chart;
+            let lastRight = -Infinity;
+            ctx.save();
+            ctx.font = `700 10px ${Chart.defaults.font.family}`;
+            ctx.fillStyle = isDarkTheme() ? '#E2E8F0' : '#0F2942';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            marks.forEach((marked, i) => {
+                if (!marked) return;
+                const bars = chart.data.datasets.flatMap((d, di) => (d.type !== 'line' && d.data[i] !== null && chart.isDatasetVisible(di)
+                    ? [{ value: d.data[i], bar: chart.getDatasetMeta(di).data[i] }]
+                    : []));
+                if (!bars.length) return;
+                const text = format(bars.reduce((sum, b) => sum + b.value, 0), true);
+                const half = ctx.measureText(text).width / 2;
+                const x = Math.min(Math.max(bars[0].bar.x, chartArea.left + half), chartArea.right - half);
+                // Angka yang akan menimpa angka sebelumnya dilewati; tooltip tetap memuatnya.
+                if (x - half < lastRight + 4) return;
+                lastRight = x + half;
+                ctx.fillText(text, x, Math.min(...bars.map((b) => b.bar.y)) - 3);
+            });
+            ctx.restore();
+        },
+    });
+
+    // Tambah garis rata-rata harian dan tandai hari yang menonjol.
+    function pomecWithAverage(bars) {
+        const totals = bars[0].data.map((_, i) => {
+            const values = bars.map((b) => b.data[i]).filter((v) => v !== null);
+            return values.length ? values.reduce((sum, v) => sum + v, 0) : null;
+        });
+        const recorded = totals.filter((v) => v !== null);
+        const average = recorded.reduce((sum, v) => sum + v, 0) / (recorded.length || 1);
+        let high = totals.map((v) => v !== null && average > 0 && v >= average * POMEC_HIGH);
+        // Kalau lebih dari seperempat hari "menonjol" (mis. gas: hari ganti tabung vs hari kosong), itu pola biasa.
+        if (high.filter(Boolean).length > recorded.length / 4) high = high.map(() => false);
+        const muted = isDarkTheme() ? '#94A3B8' : '#475569';
+
+        return { marks: high, datasets: [
+            ...bars,
+            { type: 'line', label: IS_EN ? 'Average' : 'Rata-rata', data: totals.map(() => average), borderColor: muted, backgroundColor: muted, borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 0, pointStyle: 'line', order: -1 },
+        ] };
+    }
+
+    // Kunci kelompok satu baris: tanggalnya, Senin minggu itu (dipotong di awal bulan), atau bulannya.
+    function pomecBucketKey(rec, view) {
+        const date = formatWitaIsoDate(rec.reading_date);
+        if (view === 'month') return date.slice(0, 7);
+        if (view === 'day') return date;
+        const [y, m, d] = date.split('-').map(Number);
+        const monday = d - ((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7);
+        return `${date.slice(0, 7)}-${String(Math.max(1, monday)).padStart(2, '0')}`;
+    }
+
+    // Satu batang per kelompok: hari atau minggu di bulan terpilih, atau semua bulan yang punya data.
+    function pomecBuckets(view) {
+        if (!pomecMonth) return [];
+        if (view === 'month') {
+            const short = new Intl.DateTimeFormat(IS_EN ? 'en-GB' : 'id-ID', { timeZone: 'Asia/Makassar', month: 'short', year: 'numeric' });
+            return pomecMonths().reverse().map((m) => ({ key: m, label: short.format(new Date(`${m}-15T12:00:00+08:00`)), title: pomecMonthName(m) }));
+        }
+        const [y, m] = pomecMonth.split('-').map(Number);
+        const days = Array.from({ length: new Date(y, m, 0).getDate() }, (_, i) => `${pomecMonth}-${String(i + 1).padStart(2, '0')}`);
+        if (view === 'day') return days.map((d) => ({ key: d, label: Number(d.slice(8)), title: formatWitaDateLabel(d, IS_EN) }));
+        const weeks = new Map();
+        days.forEach((d) => {
+            const key = pomecBucketKey({ reading_date: d }, view);
+            weeks.set(key, [...(weeks.get(key) || []), d]);
+        });
+        return [...weeks].map(([key, own]) => {
+            const first = Number(own[0].slice(8));
+            const last = Number(own[own.length - 1].slice(8));
+            const range = first === last ? `${first}` : `${first}–${last}`;
+            return { key, label: range, title: `${first === last ? '' : `${own[0].slice(8)}–`}${formatWitaDateLabel(own[own.length - 1], IS_EN)}` };
+        });
+    }
+
+    // Baris yang digambar: bulan terpilih saja, kecuali tampilan bulanan.
+    const pomecChartRows = (monthRows, allRows) => (pomecView === 'month' ? allRows : monthRows);
+
+    // series = [{ label, rows, key, color }]
+    function pomecDrawChart(canvas, series, { name, format, legend = false, ticks = 6, view = pomecView }) {
+        // Tanggal tercatat per kelompok, dihitung sekali jalan.
+        const recorded = {};
+        series.forEach((item) => item.rows.forEach((r) => {
+            (recorded[pomecBucketKey(r, view)] ||= new Set()).add(formatWitaIsoDate(r.reading_date));
+        }));
+        const buckets = pomecBuckets(view)
+            .map((bucket) => ({ ...bucket, days: recorded[bucket.key]?.size || 0 }))
+            // Bulan tanpa data untuk grafik ini tidak perlu digambar sebagai kolom kosong.
+            .filter((bucket) => view !== 'month' || bucket.days);
+        const bars = series.map((item) => {
+            const sums = {};
+            item.rows.forEach((r) => {
+                const key = pomecBucketKey(r, view);
+                sums[key] = (sums[key] || 0) + Number(r[item.key] || 0);
+            });
+            const data = buckets.map((b) => (b.key in sums ? Number(sums[b.key].toFixed(2)) : null));
+            return pomecBar(item.label, data, item.color, series.length > 1);
+        });
+        let datasets = bars;
+        let marks = [];
+        if (view === 'day') ({ datasets, marks } = pomecWithAverage(bars));
+        if (view === 'month') marks = buckets.map((b) => b.key === pomecMonth);
+        // Minggu dan bulan menampilkan jumlah hari di bawah labelnya.
+        const labels = buckets.map((b) => (view === 'day' ? b.label : [b.label, `${b.days} ${IS_EN ? 'days' : 'hari'}`]));
+
+        // Selalu dibuat ulang: jenis dan jumlah dataset berubah antar tampilan.
+        Chart.getChart(canvas)?.destroy();
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', `${pomecPeriod(view)}: ${name}`);
+        const options = pomecBarOptions(buckets, format, legend, ticks, view);
+        // Ruang untuk angka di atas batang tertinggi.
+        if (marks.some(Boolean)) options.scales.y.grace = '10%';
+        new Chart(canvas, { type: 'bar', data: { labels, datasets }, options, plugins: [pomecMarker(marks, format)] });
+    }
+
+    // Satu sumbu per grafik: biaya (sama-sama rupiah) boleh digabung, pemakaian beda satuan dipisah.
+    function renderPomecOverview(monthRecords, daysInMonth) {
+        const hints = {
+            day: IS_EN ? 'Dashed line: daily average. Numbers: days 25% or more above it.' : 'Garis putus-putus: rata-rata harian. Angka: hari yang 25% atau lebih di atas rata-rata.',
+            week: IS_EN ? 'One bar per week (Monday to Sunday), with the number of recorded days.' : 'Satu batang per minggu (Senin–Minggu), dengan jumlah hari tercatat.',
+            month: IS_EN ? 'One bar per month. The number marks the selected month.' : 'Satu batang per bulan. Angka menandai bulan terpilih.',
+        };
+        document.getElementById('pomec-chart-hint').textContent = hints[pomecView];
+
+        const priced = monthRecords.filter((r) => r.cost !== null);
+        const chartPriced = pomecChartRows(priced, POMEC_RECORDS.filter((r) => r.cost !== null));
+        const costTypes = Object.keys(POMEC_TYPES).filter((t) => chartPriced.some((r) => r.utility_type === t));
+        const costCanvas = document.getElementById('pomec-chart-cost');
+        // Tanpa data biaya: kartunya disembunyikan, bukan ditampilkan kosong.
+        document.getElementById('pomec-cost-card').classList.toggle('hidden', !costTypes.length);
+        if (!costTypes.length) {
+            Chart.getChart(costCanvas)?.destroy();
+        } else {
+            const monthTypes = costTypes.filter((t) => priced.some((r) => r.utility_type === t));
+            document.getElementById('pomec-cost-title').textContent = `${IS_EN ? 'Cost' : 'Biaya'} ${pomecMonthName(pomecMonth)}`;
+            document.getElementById('pomec-month-cost').textContent = priced.length ? pomecRupiah(pomecSum(priced, 'cost')) : '-';
+            document.getElementById('pomec-cost-note').textContent = monthTypes.length
+                ? `${monthTypes.map(pomecLabel).join(' + ')}, ${IS_EN ? 'before tax. Gas and diesel files have no cost.' : 'sebelum pajak. File gas dan solar tidak memuat biaya.'}`
+                : (IS_EN ? 'No cost data for this month.' : 'Belum ada data biaya bulan ini.');
+            const compact = new Intl.NumberFormat(IS_EN ? 'en-GB' : 'id-ID', { notation: 'compact', maximumFractionDigits: 1 });
+            pomecDrawChart(
+                costCanvas,
+                costTypes.map((t) => ({ label: pomecLabel(t), rows: chartPriced.filter((r) => r.utility_type === t), key: 'cost', color: pomecColor(t) })),
+                { name: IS_EN ? 'Cost per utility' : 'Biaya per utilitas', format: (v, short) => (short ? `Rp ${compact.format(v)}` : pomecRupiah(v)), legend: true },
+            );
+        }
+
+        Object.keys(POMEC_TYPES).forEach((type) => {
+            const canvas = document.getElementById(`pomec-mini-${type}`);
+            const rows = monthRecords.filter((r) => r.utility_type === type);
+            const chartRows = pomecChartRows(rows, POMEC_RECORDS.filter((r) => r.utility_type === type));
+            const card = canvas.closest('[data-mini]');
+            const recorded = Object.keys(pomecDaily(rows)).length;
+            const trend = rows.length ? pomecTrend(rows, type) : { text: '', tone: '' };
+            let sub = IS_EN ? 'No data this month.' : 'Belum ada data bulan ini.';
+            if (rows.length) {
+                sub = rows.some((r) => r.cost !== null)
+                    ? pomecRupiah(pomecSum(rows, 'cost'))
+                    : `${IS_EN ? 'Average' : 'Rata-rata'} ${pomecQty(pomecDailyAverage(rows))} ${pomecUnit(type)}/${IS_EN ? 'day' : 'hari'}`;
+                // Jumlah hari hanya disebut kalau bulannya belum lengkap.
+                if (recorded < daysInMonth) sub += ` · ${recorded}/${daysInMonth} ${IS_EN ? 'days' : 'hari'}`;
+                if (pomecViewFor(type) !== pomecView) sub += IS_EN ? ' · weekly chart' : ' · grafik per minggu';
+            }
+            card.querySelector('[data-total]').textContent = pomecQty(pomecSum(rows, 'total_usage'));
+            card.querySelector('[data-sub]').textContent = sub;
+            card.querySelector('[data-trend]').textContent = trend.text;
+            card.querySelector('[data-trend]').className = `font-semibold ${trend.tone}`;
+            // Tanpa data, kartu cukup satu baris keterangan.
+            card.querySelector('[data-value]').classList.toggle('hidden', !rows.length);
+            canvas.parentElement.classList.toggle('hidden', !chartRows.length);
+            if (!chartRows.length) {
+                Chart.getChart(canvas)?.destroy();
+                return;
+            }
+            pomecDrawChart(
+                canvas,
+                [{ label: pomecLabel(type), rows: chartRows, key: 'total_usage', color: pomecColor(type) }],
+                {
+                    name: `${IS_EN ? 'Usage' : 'Pemakaian'} ${pomecLabel(type)}`,
+                    // Satuan sudah tertulis di kartu, sumbu dan angka batang cukup angkanya.
+                    format: (v, short) => (short ? pomecQty(v) : `${pomecQty(v)} ${pomecUnit(type)}`),
+                    ticks: 4,
+                    view: pomecViewFor(type),
+                },
+            );
+        });
+    }
+
+    function renderPomecChart(monthRows) {
+        const canvas = document.getElementById('pomec-chart-trend');
+        if (!canvas) return;
+
+        const rows = pomecChartRows(monthRows, POMEC_RECORDS.filter((r) => r.utility_type === pomecType));
+        const unit = pomecUnit(pomecType);
+        const meterNames = [...new Set(rows.map((r) => r.meter_name))].sort();
+        const shades = pomecShades(pomecType);
+        // Tanpa data, area grafik disembunyikan; tabel sudah menjelaskan.
+        canvas.parentElement.parentElement.classList.toggle('hidden', !rows.length);
+        if (!rows.length) {
+            Chart.getChart(canvas)?.destroy();
+            return;
+        }
+        let series;
+        if (pomecType === 'electricity') {
+            series = [{ label: 'LWBP', rows, key: 'lwbp_value', color: shades[0] }, { label: 'WBP', rows, key: 'wbp_value', color: shades[1] }];
+        } else if (shades && meterNames.length > 1) {
+            series = meterNames.map((name, i) => ({ label: name, rows: rows.filter((r) => r.meter_name === name), key: 'total_usage', color: shades[i % shades.length] }));
+        } else {
+            series = [{ label: pomecLabel(pomecType), rows, key: 'total_usage', color: pomecColor(pomecType) }];
+        }
+
+        pomecDrawChart(canvas, series, {
+            name: `${IS_EN ? 'Usage' : 'Pemakaian'} ${pomecLabel(pomecType)}`,
+            format: (v, short) => (short ? pomecQty(v) : `${pomecQty(v)} ${unit}`),
+            legend: true,
+            view: pomecViewFor(pomecType),
+        });
+    }
+
+    // Tabel laporan POMEC (TanStack): satu baris per unggahan beserta status laporannya.
+    let pomecReportsTable;
+    let pomecReportsFilter = '';
+    const POMEC_STATUS_ORDER = { returned: 0, draft: 1, submitted: 2, in_review: 3, reviewed: 4 };
+
+    function renderPomecImports() {
+        if (!document.getElementById('pomec-imports-tbody')) return;
+        document.getElementById('pomec-batch-count').textContent = POMEC_IMPORTS.length;
+        const canDelete = pomecRoot.dataset.canDelete === '1';
+
+        // Unggahan harian: tampilkan tanggal yang dibawa tiap batch, bukan hanya bulannya.
+        const ranges = {};
+        POMEC_RECORDS.forEach((r) => {
+            const range = (ranges[r.pomec_import_id] ||= [r.reading_date, r.reading_date]);
+            if (r.reading_date < range[0]) range[0] = r.reading_date;
+            if (r.reading_date > range[1]) range[1] = r.reading_date;
+        });
+        const rangeLabel = (imp) => {
+            const [first, last] = ranges[imp.id] || [];
+            if (!first) return pomecMonthName(imp.period_month);
+            return first === last ? formatWitaDateLabel(last, IS_EN) : `${Number(first.slice(8))}–${formatWitaDateLabel(last, IS_EN)}`;
+        };
+
+        pomecReportsTable ??= createDataTable({
+            tableId: 'pomec-reports-table',
+            pagerId: 'pomec-reports-pagination',
+            sorting: [{ id: 'uploaded', desc: true }],
+            empty: () => (POMEC_IMPORTS.length
+                ? (IS_EN ? 'No reports with this status.' : 'Tidak ada laporan dengan status ini.')
+                : (IS_EN ? 'Nothing uploaded yet.' : 'Belum ada file yang diunggah.')),
+            columns: [
+                {
+                    id: 'report',
+                    header: () => (IS_EN ? 'Report' : 'Laporan'),
+                    accessor: (x) => x.rpt?.report_code || x.imp.batch_code,
+                    tdClass: 'min-w-[200px]',
+                    cell: (x) => `<div class="font-semibold text-navy">${escapeHtml(x.rpt?.report_code || x.imp.batch_code)}</div>
+                        <div class="text-[10px] text-slate-400" title="${escapeHtml(x.imp.batch_code)} · SHA-256: ${escapeHtml(x.imp.file_hash_sha256 || '')}">${escapeHtml(x.imp.original_filename)}</div>`,
+                },
+                {
+                    id: 'utility',
+                    header: () => (IS_EN ? 'Utility' : 'Utilitas'),
+                    accessor: (x) => pomecLabel(x.imp.utility_type),
+                    tdClass: 'whitespace-nowrap',
+                    cell: (x) => `<span class="inline-flex items-center gap-2 font-medium text-navy"><span class="w-2 h-2 rounded-full" style="background-color:${pomecColor(x.imp.utility_type)}" aria-hidden="true"></span>${escapeHtml(pomecLabel(x.imp.utility_type))}</span>`,
+                },
+                {
+                    id: 'period',
+                    header: () => (IS_EN ? 'Period' : 'Periode'),
+                    accessor: (x) => (ranges[x.imp.id] || [x.imp.period_month])[0],
+                    tdClass: 'whitespace-nowrap text-slate-600',
+                    cell: (x) => escapeHtml(rangeLabel(x.imp)),
+                },
+                {
+                    // Satuan berbeda antar utilitas, jadi kolom ini tidak diurutkan.
+                    id: 'usage',
+                    header: () => (IS_EN ? 'Usage' : 'Pemakaian'),
+                    align: 'right',
+                    tdClass: 'font-mono-num whitespace-nowrap',
+                    cell: (x) => `<span class="font-semibold text-navy">${pomecQty(x.imp.total_usage)}</span> ${pomecUnitHtml(x.imp.utility_type)}
+                        ${x.imp.total_cost === null || x.imp.total_cost === undefined ? '' : `<div class="text-[10px] text-slate-500">${pomecRupiah(x.imp.total_cost)}</div>`}`,
+                },
+                {
+                    id: 'uploaded',
+                    header: () => (IS_EN ? 'Submitted by (WITA)' : 'Diunggah oleh (WITA)'),
+                    accessor: (x) => x.imp.committed_at || '',
+                    tdClass: 'text-slate-600 whitespace-nowrap',
+                    cell: (x) => `<div>${escapeHtml(x.imp.uploader?.name || '-')}</div><div class="text-[10px] font-mono-num text-slate-400">${escapeHtml(formatWita(x.imp.committed_at, true))}</div>`,
+                },
+                {
+                    id: 'status',
+                    header: 'Status',
+                    accessor: (x) => POMEC_STATUS_ORDER[x.rpt?.status] ?? 9,
+                    tdClass: 'whitespace-nowrap',
+                    cell: (x) => (x.rpt ? pomecStatusBadge(x.rpt.status) : dash),
+                },
+                {
+                    id: 'actions',
+                    header: () => (IS_EN ? 'Action' : 'Aksi'),
+                    align: 'right',
+                    tdClass: 'whitespace-nowrap',
+                    cell: (x) => `${x.rpt ? `<button type="button" data-pomec-report="${Number(x.rpt.id)}" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-navy hover:text-white text-navy text-xs font-semibold transition cursor-pointer">${canReviewReport(x.rpt) ? T.review : T.view}</button>` : ''}
+                        ${canDelete ? `<button type="button" data-pomec-delete="${Number(x.imp.id)}" class="ml-1 px-2.5 py-1.5 rounded-xl text-slate-400 hover:text-crimson-dark hover:bg-rose-50 text-xs font-semibold transition cursor-pointer disabled:opacity-50">${IS_EN ? 'Delete' : 'Hapus'}</button>` : ''}`,
+                },
+            ],
+        });
+        if (!pomecReportsTable) return;
+
+        const statusOf = (imp) => pomecReportOf(imp.id)?.status || '';
+        document.querySelectorAll('[data-pomec-status]').forEach((btn) => {
+            const key = btn.dataset.pomecStatus;
+            btn.setAttribute('aria-pressed', key === pomecReportStatus ? 'true' : 'false');
+            const count = key === 'all' ? POMEC_IMPORTS.length : POMEC_IMPORTS.filter((imp) => statusOf(imp) === key).length;
+            btn.querySelector('[data-count]').textContent = count ? count : '';
+        });
+        const data = POMEC_IMPORTS
+            .filter((imp) => pomecReportStatus === 'all' || statusOf(imp) === pomecReportStatus)
+            .map((imp) => ({ imp, rpt: pomecReportOf(imp.id) }));
+        pomecReportsTable.setData(data, { resetPage: pomecReportStatus !== pomecReportsFilter });
+        pomecReportsFilter = pomecReportStatus;
+    }
+
+    document.querySelectorAll('[data-pomec-status]').forEach((btn) => btn.addEventListener('click', () => {
+        pomecReportStatus = btn.dataset.pomecStatus;
+        renderPomecImports();
+    }));
+    // Ringkasan antrean di atas halaman langsung membuka daftar laporan dengan status itu.
+    document.getElementById('pomec-freshness')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pomec-queue]');
+        if (!btn) return;
+        pomecReportStatus = btn.dataset.pomecQueue;
+        renderPomecImports();
+        document.getElementById('pomec-reports-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    document.getElementById('pomec-imports-tbody')?.addEventListener('click', async (e) => {
+        const open = e.target.closest('[data-pomec-report]');
+        if (open) return window.openReportDetail(Number(open.dataset.pomecReport));
+        const btn = e.target.closest('[data-pomec-delete]');
+        if (!btn) return;
+        const id = Number(btn.dataset.pomecDelete);
+        const imp = POMEC_IMPORTS.find((i) => i.id === id);
+        if (!imp) return;
+        const what = `${pomecLabel(imp.utility_type)} ${pomecMonthName(imp.period_month)}`;
+        const question = IS_EN
+            ? `Delete ${what} (${imp.total_rows} rows) from "${imp.original_filename}"?\n\nThese readings disappear from the charts. You can then upload the corrected file.`
+            : `Hapus data ${what} (${imp.total_rows} baris) dari file "${imp.original_filename}"?\n\nData ini hilang dari grafik. Setelah itu file yang benar bisa diunggah lagi.`;
+        if (!window.confirm(question)) return;
+
+        btn.disabled = true;
+        try {
+            const res = await fetch(`/pomec/imports/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRF-TOKEN': CSRF_TOKEN, Accept: 'application/json' },
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                window.showToast(extractErrorMessage(data, T.saveFailed), 'error');
+                btn.disabled = false;
+                return;
+            }
+            // Laporannya ikut terhapus di server.
+            REPORTS_DATA = REPORTS_DATA.filter((r) => r.pomec_import_id !== id);
+            removePomecImport(id);
+            renderReportsTable();
+            refreshKpis();
+            window.showToast(data.message, 'success');
+        } catch {
+            window.showToast(T.networkError, 'error');
+            btn.disabled = false;
         }
     });
 
-    document.getElementById('pomec-search')?.addEventListener('input', (e) => {
-        pomecSearchQuery = e.target.value;
-        renderPomecRecords();
-        renderPomecImports();
+    document.querySelectorAll('[data-pomec-view]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            pomecView = btn.dataset.pomecView;
+            renderPomec();
+        });
     });
 
     document.getElementById('pomec-month-filter')?.addEventListener('change', (e) => {
-        pomecMonthFilter = e.target.value;
-        renderPomecRecords();
-        renderPomecImports();
+        pomecMonth = e.target.value;
+        renderPomec();
     });
 
-    document.querySelectorAll('.pomec-filter-btn').forEach((btn) => {
+    document.querySelectorAll('[data-pomec-open]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            pomecFilterType = btn.dataset.type;
-            document.querySelectorAll('.pomec-filter-btn').forEach((b) => {
-                const active = b.dataset.type === pomecFilterType;
-                b.className = 'pomec-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ' +
-                    (active ? 'bg-navy text-white' : 'text-slate-600 hover:text-navy');
-            });
-            renderPomecRecords();
-            renderPomecImports();
+            pomecType = btn.dataset.pomecOpen;
+            renderPomec();
         });
     });
 
-    window.resetPomecFilters = function () {
-        pomecFilterType = 'all';
-        pomecMonthFilter = '';
-        pomecSearchQuery = '';
-        const s = document.getElementById('pomec-search');
-        const m = document.getElementById('pomec-month-filter');
-        if (s) s.value = '';
-        if (m) m.value = '';
-        document.querySelectorAll('.pomec-filter-btn').forEach((b) => {
-            const active = b.dataset.type === 'all';
-            b.className = 'pomec-filter-btn px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ' +
-                (active ? 'bg-navy text-white' : 'text-slate-600 hover:text-navy');
-        });
-        renderPomecRecords();
-        renderPomecImports();
-    };
+    const pomecDialog = document.getElementById('pomec-upload-panel');
+
+    // Pesan ditampilkan di dalam dialog: toast akan tertutup latar dialog.
+    function showPomecMessage(message, tone = 'error') {
+        const banner = document.getElementById('pomec-hash-banner');
+        const tones = {
+            ok: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+            warn: 'bg-amber-50 border-amber-200 text-amber-800',
+            error: 'bg-rose-50 border-rose-200 text-crimson-dark',
+        };
+        banner.className = `p-3 rounded-xl border text-xs font-semibold whitespace-pre-line ${tones[tone]}`;
+        banner.textContent = message;
+    }
+
+    function resetPomecPreview() {
+        currentPomecPreviewToken = null;
+        document.getElementById('pomec-preview-box')?.classList.add('hidden');
+        document.getElementById('pomec-hash-banner')?.classList.add('hidden');
+        document.getElementById('pomec-commit-btn')?.classList.add('hidden');
+        document.getElementById('pomec-draft-btn')?.classList.add('hidden');
+        document.getElementById('pomec-preview-btn')?.classList.remove('hidden');
+    }
+
+    function renderPomecFile() {
+        const file = document.getElementById('pomec-file-input')?.files?.[0];
+        const name = document.getElementById('pomec-file-name');
+        const info = document.getElementById('pomec-file-info');
+        if (!name || !info) return;
+        name.textContent = file ? file.name : name.dataset.empty;
+        info.textContent = file ? `${Math.max(1, Math.round(file.size / 1024))} KB` : info.dataset.empty;
+    }
+
+    // replace = laporan yang dikembalikan HOD: jenis dan bulan dikunci, isi batch lamanya diganti.
+    function openPomecUpload(replace = null) {
+        if (!pomecDialog) return;
+        const typeEl = document.getElementById('pomec-utility-type');
+        const monthEl = document.getElementById('pomec-period-month');
+        const imp = replace ? POMEC_IMPORTS.find((i) => i.id === replace.pomec_import_id) : null;
+        pomecReplace = replace && imp ? { id: replace.id, type: imp.utility_type, month: imp.period_month } : null;
+        if (pomecReplace) {
+            typeEl.value = pomecReplace.type;
+            monthEl.value = pomecReplace.month;
+        } else if (pomecType !== 'all') {
+            // Ikuti utilitas yang sedang dilihat.
+            typeEl.value = pomecType;
+        }
+        typeEl.disabled = !!pomecReplace;
+        monthEl.disabled = !!pomecReplace;
+        const subtitle = document.getElementById('pomec-upload-subtitle');
+        subtitle.dataset.default ??= subtitle.textContent;
+        document.getElementById('pomec-upload-title').textContent = pomecReplace
+            ? `${IS_EN ? 'Re-upload Correction' : 'Unggah Ulang Perbaikan'} · ${replace.report_code}`
+            : (IS_EN ? 'Upload Daily Data' : 'Unggah Data Harian');
+        subtitle.textContent = pomecReplace
+            ? `${IS_EN ? 'HOD note' : 'Catatan HOD'}: ${replace.review_note || '-'} ${IS_EN ? 'The corrected file replaces this report\'s data and is sent back to the HOD.' : 'File perbaikan menggantikan isi laporan ini dan dikirim ulang ke HOD.'}`
+            : subtitle.dataset.default;
+        pomecDialog.showModal();
+    }
+
+    document.getElementById('pomec-upload-toggle')?.addEventListener('click', () => openPomecUpload());
+    pomecDialog?.querySelectorAll('[data-pomec-close]').forEach((btn) => btn.addEventListener('click', () => pomecDialog.close()));
+    pomecDialog?.addEventListener('close', () => {
+        document.getElementById('pomec-preview-form').reset();
+        pomecReplace = null;
+        document.getElementById('pomec-utility-type').disabled = false;
+        document.getElementById('pomec-period-month').disabled = false;
+        renderPomecFile();
+        resetPomecPreview();
+    });
+
+    // Pilihan berubah = preview lama tidak berlaku lagi.
+    document.getElementById('pomec-preview-form')?.addEventListener('change', () => {
+        renderPomecFile();
+        resetPomecPreview();
+    });
 
     document.getElementById('pomec-preview-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
+        if (pomecReplace) {
+            // Isian yang dikunci tidak ikut terkirim, jadi diisi manual.
+            fd.set('utility_type', pomecReplace.type);
+            fd.set('period_month', pomecReplace.month);
+            fd.set('replace_report_id', pomecReplace.id);
+        }
         const btn = document.getElementById('pomec-preview-btn');
+        const label = btn.textContent;
         btn.disabled = true;
+        btn.textContent = btn.dataset.busy;
+        resetPomecPreview();
 
         try {
             const res = await fetch('/pomec/preview', {
@@ -2299,113 +3049,142 @@ function initWorkspace() {
             });
             const data = await res.json();
             if (!res.ok) {
-                window.showToast(extractErrorMessage(data, T.saveFailed), 'error');
+                showPomecMessage(extractErrorMessage(data, T.saveFailed));
                 return;
             }
 
             currentPomecPreviewToken = data.preview_token;
             const p = data.preview;
-            document.getElementById('pomec-preview-box').classList.remove('hidden');
+            const rows = p.rows || [];
+            const canSave = !p.is_duplicate_file && p.valid_count > 0;
 
-            const banner = document.getElementById('pomec-hash-banner');
+            const dateLabel = (d) => formatWitaDateLabel(d, IS_EN);
+            const dateList = (dates) => {
+                const unique = [...new Set(dates)].sort();
+                return unique.length > 4
+                    ? `${dateLabel(unique[0])} … ${dateLabel(unique[unique.length - 1])} (${unique.length} ${IS_EN ? 'dates' : 'tanggal'})`
+                    : unique.map(dateLabel).join(', ');
+            };
+
+            // Pemeriksaan untuk unggahan harian: baru, sudah tersimpan, berbeda, bermasalah, tanggal terlewat.
+            let message;
+            let tone = 'error';
             if (p.is_duplicate_file) {
-                banner.className = 'p-3 rounded-xl border bg-rose-50 border-rose-200 text-crimson-dark text-xs space-y-1';
-                banner.innerHTML = `<div class="font-bold">${T.dupFileTitle}</div>
-                    <div>${T.dupFileDesc} <strong>${escapeHtml(p.duplicate_batch)}</strong>.</div>`;
+                message = IS_EN
+                    ? `This exact file was already uploaded (${p.duplicate_batch}). Nothing new to save.`
+                    : `File yang sama persis sudah pernah diunggah (${p.duplicate_batch}). Tidak ada data baru untuk disimpan.`;
+                tone = 'warn';
+            } else if (!rows.length) {
+                message = (p.errors || []).join(' ');
             } else {
-                banner.className = 'p-3 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 text-xs space-y-1';
-                banner.innerHTML = `<div class="font-bold">${T.uniqueHashTitle} &bull; ${p.valid_count} ${T.valid}, ${p.error_count} ${T.errorDup}</div>
-                    <div class="font-mono-num text-[11px]">Hash: ${escapeHtml(p.file_hash.slice(0, 32))}...</div>`;
+                const newDates = rows.filter((r) => r.status === 'valid').map((r) => r.reading_date);
+                const total = `${pomecQty(p.total_usage)} ${pomecUnit(p.utility_type)}${p.total_cost === null ? '' : ` · ${pomecRupiah(p.total_cost)}`}`;
+                const lines = [];
+                if (p.valid_count) {
+                    lines.push(IS_EN
+                        ? `New: ${p.valid_count} rows (${dateList(newDates)}), total ${total}.`
+                        : `Baru: ${p.valid_count} data (${dateList(newDates)}), total ${total}.`);
+                } else {
+                    lines.push(p.last_saved_date
+                        ? (IS_EN ? `No new dates. Data up to ${dateLabel(p.last_saved_date)} is already saved.` : `Tidak ada tanggal baru. Data s/d ${dateLabel(p.last_saved_date)} sudah tersimpan.`)
+                        : (IS_EN ? 'No rows can be saved.' : 'Tidak ada data yang bisa disimpan.'));
+                }
+                if (p.existing_count) lines.push(IS_EN ? `${p.existing_count} rows already saved earlier, skipped.` : `${p.existing_count} data sudah tersimpan sebelumnya, dilewati.`);
+                if (p.changed_count) lines.push(IS_EN ? `${p.changed_count} rows differ from what is saved and are not overwritten.` : `${p.changed_count} data berbeda dengan yang tersimpan dan tidak ditimpa.`);
+                if (p.error_count) lines.push(IS_EN ? `${p.error_count} rows have problems and are skipped.` : `${p.error_count} data bermasalah dan dilewati.`);
+                if (p.missing_dates?.length) {
+                    lines.push(IS_EN
+                        ? `Missing dates: ${dateList(p.missing_dates)}. Not saved yet and not readable in the file (incomplete meter readings?).`
+                        : `Tanggal terlewat: ${dateList(p.missing_dates)}. Belum tersimpan dan tidak terbaca di file (angka meter belum lengkap?).`);
+                }
+                message = lines.join('\n');
+                // Hijau hanya kalau semuanya beres; sudah-tersimpan saja bukan masalah.
+                const warnings = p.changed_count || p.error_count || p.missing_dates?.length;
+                tone = canSave && !warnings ? 'ok' : 'warn';
             }
+            showPomecMessage(message, tone);
 
-            document.getElementById('pomec-preview-rows').innerHTML = (p.rows || []).map((r) => `
-                <tr class="hover:bg-slate-50/70">
-                    <td class="py-3 px-4 font-mono-num whitespace-nowrap">${escapeHtml(formatWitaDateLabel(r.reading_date, IS_EN))}</td>
-                    <td class="py-3 px-4">
+            // Data yang sudah tersimpan tidak perlu ditampilkan; yang perlu perhatian di atas.
+            const statusLabel = IS_EN
+                ? { valid: 'New', changed: 'Differs', error: 'Problem' }
+                : { valid: 'Baru', changed: 'Berbeda', error: 'Bermasalah' };
+            const statusTone = { valid: 'bg-emerald-50 text-emerald-700', changed: 'bg-amber-50 text-amber-800', error: 'bg-rose-50 text-crimson-dark' };
+            const rank = { error: 0, changed: 1, valid: 2 };
+            const shown = rows.filter((r) => r.status !== 'existing')
+                .sort((a, b) => rank[a.status] - rank[b.status] || a.reading_date.localeCompare(b.reading_date));
+            document.getElementById('pomec-preview-rows').innerHTML = shown.map((r) => `
+                <tr>
+                    <td class="py-2.5 px-4 font-mono-num whitespace-nowrap">${escapeHtml(dateLabel(r.reading_date))}</td>
+                    <td class="py-2.5 px-4">
                         <div class="font-medium text-navy">${escapeHtml(r.meter_name)}</div>
-                        ${r.error_message ? `<div class="text-[11px] text-crimson-dark mt-0.5">${escapeHtml(r.error_message)}</div>` : ''}
+                        ${r.errors?.length ? `<div class="text-[11px] mt-0.5 ${r.status === 'changed' ? 'text-amber-800' : 'text-crimson-dark'}">${escapeHtml(r.errors.join(', '))}</div>` : ''}
                     </td>
-                    <td class="py-3 px-4 text-right font-mono-num whitespace-nowrap">${Number(r.total_usage || 0).toLocaleString('id-ID')}</td>
-                    <td class="py-3 px-4 whitespace-nowrap">
-                        <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${r.status === 'valid' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-crimson-dark'}">
-                            ${escapeHtml(r.status.toUpperCase())}
-                        </span>
+                    <td class="py-2.5 px-4 text-right font-mono-num whitespace-nowrap">${pomecQty(r.total_usage)} ${pomecUnit(p.utility_type)}${r.cost === null ? '' : `<div class="text-[10px] text-slate-500">${pomecRupiah(r.cost)}</div>`}</td>
+                    <td class="py-2.5 px-4 whitespace-nowrap">
+                        <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusTone[r.status]}">${statusLabel[r.status]}</span>
                     </td>
                 </tr>
             `).join('');
 
-            document.getElementById('pomec-commit-btn').disabled = p.is_duplicate_file || p.valid_count === 0;
+            // "Periksa File" diganti tombol simpan kalau ada data baru: draft dulu, atau langsung ke HOD.
+            const commit = document.getElementById('pomec-commit-btn');
+            const draft = document.getElementById('pomec-draft-btn');
+            commit.disabled = false;
+            draft.disabled = false;
+            commit.textContent = pomecReplace
+                ? (IS_EN ? 'Send Correction to HOD' : 'Kirim Ulang ke HOD')
+                : (IS_EN ? 'Save & Submit to HOD' : 'Simpan & Kirim ke HOD');
+            commit.classList.toggle('hidden', !canSave);
+            draft.classList.toggle('hidden', !canSave || !!pomecReplace);
+            btn.classList.toggle('hidden', canSave);
+            document.getElementById('pomec-preview-box').classList.toggle('hidden', !shown.length || p.is_duplicate_file);
         } catch {
-            window.showToast(T.networkError, 'error');
+            showPomecMessage(T.networkError);
         } finally {
             btn.disabled = false;
+            btn.textContent = label;
         }
     });
 
-    function refreshPomecSummaryCards() {
-        const elecRecs = POMEC_RECORDS.filter((r) => r.utility_type === 'electricity');
-        const waterRecs = POMEC_RECORDS.filter((r) => r.utility_type === 'water');
-        const elecTotal = elecRecs.reduce((s, r) => s + Number(r.total_usage || 0), 0);
-        const lwbpTotal = elecRecs.reduce((s, r) => s + Number(r.lwbp_value || 0), 0);
-        const wbpTotal = elecRecs.reduce((s, r) => s + Number(r.wbp_value || 0), 0);
-        const waterTotal = waterRecs.reduce((s, r) => s + Number(r.water_m3 || 0), 0);
-        const lwbpPct = elecTotal > 0 ? Math.round((lwbpTotal / elecTotal) * 100) : 0;
-        const wbpPct = elecTotal > 0 ? 100 - lwbpPct : 0;
-
-        const elElec = document.getElementById('pomec-stat-elec-total');
-        const elLwbpBar = document.getElementById('pomec-stat-elec-lwbp-bar');
-        const elWbpBar = document.getElementById('pomec-stat-elec-wbp-bar');
-        const elSplit = document.getElementById('pomec-stat-elec-split');
-        const elWater = document.getElementById('pomec-stat-water-total');
-        const elWaterCnt = document.getElementById('pomec-stat-water-count');
-
-        if (elElec) elElec.textContent = Math.round(elecTotal).toLocaleString('id-ID');
-        if (elLwbpBar) elLwbpBar.style.width = `${lwbpPct}%`;
-        if (elWbpBar) elWbpBar.style.width = `${wbpPct}%`;
-        if (elSplit) {
-            elSplit.innerHTML = `<span>LWBP: ${Math.round(lwbpTotal).toLocaleString('id-ID')} (${lwbpPct}%)</span>` +
-                `<span>WBP: ${Math.round(wbpTotal).toLocaleString('id-ID')} (${wbpPct}%)</span>`;
-        }
-        if (elWater) elWater.textContent = waterTotal.toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-        if (elWaterCnt) elWaterCnt.textContent = `${waterRecs.length} ${IS_EN ? 'records' : 'catatan'}`;
-    }
-
-    document.getElementById('pomec-commit-btn')?.addEventListener('click', async () => {
+    async function commitPomec(intent) {
         if (!currentPomecPreviewToken) return;
-        const btn = document.getElementById('pomec-commit-btn');
+        const btn = document.getElementById(intent === 'draft' ? 'pomec-draft-btn' : 'pomec-commit-btn');
         btn.disabled = true;
         try {
             const res = await fetch('/pomec/commit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF_TOKEN, Accept: 'application/json' },
-                body: JSON.stringify({ preview_token: currentPomecPreviewToken }),
+                body: JSON.stringify({ preview_token: currentPomecPreviewToken, intent }),
             });
             const data = await res.json();
             if (!res.ok) {
-                window.showToast(extractErrorMessage(data, T.saveFailed), 'error');
+                showPomecMessage(extractErrorMessage(data, T.saveFailed));
                 btn.disabled = false;
                 return;
             }
+            pomecDialog.close();
             window.showToast(data.message, 'success');
-            if (data.import?.records) {
-                POMEC_RECORDS = [...data.import.records, ...POMEC_RECORDS];
-                renderPomecRecords();
-                refreshPomecSummaryCards();
+            if (data.replaced_import_id) {
+                POMEC_RECORDS = POMEC_RECORDS.filter((r) => r.pomec_import_id !== data.replaced_import_id);
+                POMEC_IMPORTS = POMEC_IMPORTS.filter((i) => i.id !== data.replaced_import_id);
             }
             if (data.import) {
+                POMEC_RECORDS = [...(data.import.records || []), ...POMEC_RECORDS];
                 POMEC_IMPORTS.unshift(data.import);
-                renderPomecImports();
+                // Langsung tampilkan data yang baru disimpan.
+                pomecType = data.import.utility_type;
+                pomecMonth = data.import.period_month;
             }
-            document.getElementById('pomec-preview-box').classList.add('hidden');
-            document.getElementById('pomec-preview-form').reset();
-            const label = document.getElementById('pomec-file-label');
-            if (label) label.textContent = IS_EN ? 'Choose .xlsx or .csv file' : 'Pilih file .xlsx atau .csv';
-            currentPomecPreviewToken = null;
+            if (data.report) upsertReportInState(data.report);
+            renderPomec();
+            renderPomecImports();
         } catch {
-            window.showToast(T.networkError, 'error');
+            showPomecMessage(T.networkError);
             btn.disabled = false;
         }
-    });
+    }
+    document.getElementById('pomec-commit-btn')?.addEventListener('click', () => commitPomec('submit'));
+    document.getElementById('pomec-draft-btn')?.addEventListener('click', () => commitPomec('draft'));
 
     // -------------------------------------------------------------------------
     // 7. Topology, Profile Password & Admin Controls
@@ -4356,13 +5135,12 @@ function initWorkspace() {
 
     bindSortableHeaders('reports-table', tableStates.reports, renderReportsTable);
     bindSortableHeaders('reports-history-table', tableStates.histories, renderReportHistories);
-    bindSortableHeaders('pomec-records-table', tableStates.pomec, renderPomecRecords);
     bindSortableHeaders('admin-users-table', tableStates.users, renderAdminUsers);
     bindSortableHeaders('admin-audit-table', tableStates.audit, renderAdminAuditLogs);
 
     renderReportsTable();
     renderReportHistories();
-    renderPomecRecords();
+    renderPomec();
     renderPomecImports();
     renderAdminUsers();
     renderAdminAuditLogs();
@@ -4382,7 +5160,7 @@ function initWorkspace() {
             console.error('Failed to refresh Reports charts on theme switch:', err);
         }
         try {
-            renderPomecRecords();
+            renderPomec();
         } catch (err) {
             console.error('Failed to refresh POMEC charts on theme switch:', err);
         }

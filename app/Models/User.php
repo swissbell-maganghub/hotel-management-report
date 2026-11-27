@@ -170,6 +170,10 @@ class User extends Authenticatable
 
     public function canCreateReports(): bool
     {
+        if (! config('hotel.manual_reports')) {
+            return false;
+        }
+
         return $this->isItAdmin() || count($this->inputtableDepartmentIds()) > 0;
     }
 
@@ -223,6 +227,16 @@ class User extends Authenticatable
         $engId = Department::where('code', 'ENG')->value('id');
 
         return $engId ? $this->canInputDepartment((int) $engId) : false;
+    }
+
+    /**
+     * Hapus batch impor POMEC: level review di Engineering (HOD Engineering dan IT Admin).
+     */
+    public function canDeletePomec(): bool
+    {
+        $engId = Department::where('code', 'ENG')->value('id');
+
+        return $engId ? $this->canReviewDepartment((int) $engId) : false;
     }
 
     public function roleLabel(string $locale = 'id'): string

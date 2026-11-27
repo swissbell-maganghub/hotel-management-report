@@ -26,6 +26,7 @@ Route::middleware(['auth', 'active'])->group(function (): void {
     // Departmental Reports (Dynamic Per-Department Table Templates + Workflow)
     Route::post('/reports', [DepartmentReportController::class, 'store'])->name('reports.store');
     Route::post('/reports/{report}', [DepartmentReportController::class, 'update'])->name('reports.update');
+    Route::post('/reports/{report}/submit', [DepartmentReportController::class, 'submit'])->name('reports.submit');
     Route::post('/reports/{report}/review', [DepartmentReportController::class, 'review'])->name('reports.review');
     Route::delete('/reports/{report}', [DepartmentReportController::class, 'destroy'])->name('reports.destroy');
     Route::get('/reports/{report}/export/excel', [DepartmentReportController::class, 'exportExcel'])->name('reports.export.excel');
@@ -35,7 +36,7 @@ Route::middleware(['auth', 'active'])->group(function (): void {
     // POMEC Utility Management (Excel Import + SHA-256 Preview + Commit + Export)
     Route::post('/pomec/preview', [PomecController::class, 'preview'])->name('pomec.preview');
     Route::post('/pomec/commit', [PomecController::class, 'commit'])->name('pomec.commit');
-    Route::get('/pomec/template/{utilityType}', [PomecController::class, 'template'])->name('pomec.template');
+    Route::delete('/pomec/imports/{import}', [PomecController::class, 'destroy'])->name('pomec.imports.destroy');
     Route::get('/pomec/export/{utilityType}/excel', [PomecController::class, 'exportExcel'])->name('pomec.export.excel');
     Route::get('/pomec/export/{utilityType}/pdf', [PomecController::class, 'exportPdf'])->name('pomec.export.pdf');
 

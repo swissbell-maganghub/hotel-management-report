@@ -355,6 +355,7 @@
 
         <!-- Department Templates & Operational Snapshot -->
         <div class="lg:col-span-4 space-y-5">
+            @if (config('hotel.manual_reports') && $templates->isNotEmpty())
             <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-3">
                 <div class="flex items-center justify-between">
                     <h3 class="text-sm font-heading font-bold text-navy">
@@ -384,12 +385,13 @@
                     @endforeach
                 </div>
             </div>
+            @endif
 
             @if ($canPomec)
                 <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-3">
                     <div class="flex items-center justify-between">
                         <h3 class="text-sm font-heading font-bold text-navy">
-                            {{ $isEn ? 'POMEC Utility Summary' : 'Ringkasan Utilitas POMEC' }}
+                            {{ $isEn ? 'POMEC Control Summary' : 'Ringkasan POMEC Control' }}
                         </h3>
                         <button type="button" onclick="switchWorkspaceTab('pomec')" class="text-xs font-semibold text-teal hover:underline cursor-pointer">
                             {{ $isEn ? 'Open' : 'Buka' }} &rarr;

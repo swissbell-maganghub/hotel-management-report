@@ -160,13 +160,13 @@
         </div>
     </section>
 
-    <!-- Row 2: Executive Charts (POMEC Utility Trend + Report Workflow Status) -->
+    <!-- Row 2: Executive Charts (POMEC Control Trend + Report Workflow Status) -->
     <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div class="lg:col-span-7 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)] flex flex-col justify-between space-y-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h3 class="text-sm font-heading font-bold text-navy">
-                        {{ $isEn ? 'POMEC Utility Trend — Electricity & Water' : 'Ringkasan Eksekutif Energi & Air (POMEC)' }}
+                        {{ $isEn ? 'POMEC Control Trend — Electricity & Water' : 'Ringkasan Eksekutif Energi & Air (POMEC Control)' }}
                     </h3>
                     <p class="text-xs text-slate-500">
                         {{ $isEn ? 'Daily LWBP vs WBP (kWh) & PDAM Water (m³)' : 'Tren harian listrik LWBP vs WBP (kWh) dan konsumsi air PDAM (m³)' }}

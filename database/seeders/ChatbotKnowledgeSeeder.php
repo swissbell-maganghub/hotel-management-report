@@ -39,8 +39,8 @@ class ChatbotKnowledgeSeeder extends Seeder
             [
                 'slug' => 'guide-pomec-upload', 'type' => 'guide', 'priority' => 10, 'title' => 'Cara unggah laporan POMEC',
                 'triggers' => self::HOW.'|unggah|upload|impor|import + pomec|listrik|air|water|utilit|excel|meter',
-                'body_id' => "Langkah mengunggah laporan POMEC:\n1. Buka tab POMEC Utility.\n2. Unduh template Excel contoh jika perlu (Listrik LWBP/WBP atau Air m³).\n3. Unggah file .xlsx untuk masuk ke tahap Preview & Cek Duplikasi SHA-256.\n4. Pastikan semua baris berstatus Valid, lalu klik Simpan Data Valid ke Database.",
-                'body_en' => "Steps to import a POMEC Excel report:\n1. Open the POMEC Utility tab.\n2. Download the sample Excel template if needed (Electricity LWBP/WBP or Water m³).\n3. Upload your .xlsx file to enter Preview & SHA-256 Deduplication.\n4. Verify all rows show Valid, then click Commit Valid Rows to Database.",
+                'body_id' => "Langkah mengunggah laporan POMEC:\n1. Buka menu POMEC Control (Laporan Departemen → Engineering).\n2. Pilih jenis utilitas (Listrik, Air, Gas LPG, atau Solar) dan bulan periodenya.\n3. Unggah file Excel bulanan asli (.xlsx/.xls) untuk masuk ke tahap Preview & Cek Duplikasi SHA-256.\n4. Pastikan semua baris berstatus Valid, lalu klik Simpan Data Valid ke Database.",
+                'body_en' => "Steps to import a POMEC Excel report:\n1. Open POMEC Control (Department Reports → Engineering).\n2. Choose the utility (Electricity, Water, LPG Gas, or Diesel) and the period month.\n3. Upload the original monthly Excel file (.xlsx/.xls) to enter Preview & SHA-256 Deduplication.\n4. Verify all rows show Valid, then click Commit Valid Rows to Database.",
             ],
             [
                 'slug' => 'guide-escalation', 'type' => 'guide', 'priority' => 5, 'title' => 'Eskalasi ke HOD / IT',
@@ -63,8 +63,8 @@ class ChatbotKnowledgeSeeder extends Seeder
             [
                 'slug' => 'guide-input-review', 'type' => 'guide', 'priority' => 0, 'title' => 'Cara input & review laporan',
                 'triggers' => self::HOW.' + review|periksa|revisi|input|buat|membuat|isi|mengisi|kirim|submit|approve|setujui',
-                'body_id' => "Panduan Input & Pemeriksaan Laporan (Tahap 1–5):\n1. Buat/Kirim: Klik '+ Buat Laporan', pilih template departemen, isi tabel, lalu Simpan Draft atau Kirim ke HOD.\n2. Pemeriksaan HOD: HOD membuka Detail -> 'Mulai Pemeriksaan', lalu pilih 'Tandai Reviewed' atau 'Kembalikan untuk Revisi' (wajib isi catatan).\n3. Monitoring: Laporan berstatus Reviewed siap dipantau manajemen.",
-                'body_en' => "Departmental Reporting Steps (Stages 1–5):\n1. Create/Edit: Click '+ Create Report', select your template, fill table rows, then Save Draft or Submit.\n2. HOD Review: HOD opens Detail -> 'Start Review', then chooses 'Mark as Reviewed' or 'Return for Revision' (with note).\n3. Management Monitoring: Reviewed reports become 'Available for monitoring'.",
+                'body_id' => "Panduan Input & Pemeriksaan Laporan (Tahap 1–5):\n1. Unggah (Engineering): buka POMEC Control, klik Unggah File, Periksa File, lalu Simpan Draft atau Simpan & Kirim ke HOD. Form isian laporan manual sudah tidak dipakai.\n2. Pemeriksaan HOD: HOD membuka Detail -> 'Mulai Pemeriksaan', lalu pilih 'Tandai Reviewed' atau 'Kembalikan untuk Revisi' (wajib isi catatan).\n3. Monitoring: Laporan berstatus Reviewed siap dipantau manajemen.",
+                'body_en' => "Departmental Reporting Steps (Stages 1–5):\n1. Upload (Engineering): open POMEC Control, click Upload File, Check File, then Save as Draft or Save & Submit to HOD. The manual report form is no longer used.\n2. HOD Review: HOD opens Detail -> 'Start Review', then chooses 'Mark as Reviewed' or 'Return for Revision' (with note).\n3. Management Monitoring: Reviewed reports become 'Available for monitoring'.",
             ],
             [
                 'slug' => 'guide-dashboard', 'type' => 'guide', 'priority' => 0, 'title' => 'Cara membaca dashboard',
@@ -84,11 +84,11 @@ class ChatbotKnowledgeSeeder extends Seeder
 
         return [
             $g('lwbp', 'LWBP / WBP', ['lwbp', 'wbp'],
-                '**LWBP** (Luar Waktu Beban Puncak): pemakaian listrik di luar jam beban puncak; dikenakan tarif lebih rendah. Pasangannya **WBP** (Waktu Beban Puncak): pemakaian pada jam beban puncak, umumnya pukul 17.00–22.00 sesuai ketentuan PLN, dengan tarif lebih tinggi. Keduanya dicatat per meter pada modul POMEC Utility.',
-                '**LWBP** (Luar Waktu Beban Puncak): off-peak electricity usage, billed at the lower tariff. Its counterpart **WBP** (Waktu Beban Puncak) is peak-hour usage, typically 17:00–22:00 under PLN tariffs, billed higher. Both are recorded per meter in the POMEC Utility module.'),
+                '**LWBP** (Luar Waktu Beban Puncak): pemakaian listrik di luar jam beban puncak; dikenakan tarif lebih rendah. Pasangannya **WBP** (Waktu Beban Puncak): pemakaian pada jam beban puncak, umumnya pukul 17.00–22.00 sesuai ketentuan PLN, dengan tarif lebih tinggi. Keduanya dicatat per meter pada modul POMEC Control.',
+                '**LWBP** (Luar Waktu Beban Puncak): off-peak electricity usage, billed at the lower tariff. Its counterpart **WBP** (Waktu Beban Puncak) is peak-hour usage, typically 17:00–22:00 under PLN tariffs, billed higher. Both are recorded per meter in the POMEC Control module.'),
             $g('pomec', 'POMEC', ['pomec'],
-                '**POMEC** adalah modul utilitas pada sistem ini untuk mencatat pembacaan meter **listrik** (LWBP/WBP, kWh) dan **air** (m³), diimpor dari file Excel dengan pengecekan duplikasi.',
-                "**POMEC** is this system's utility module for recording **electricity** (LWBP/WBP, kWh) and **water** (m³) meter readings, imported from Excel with duplicate checks."),
+                '**POMEC** adalah modul utilitas pada sistem ini untuk mencatat pembacaan meter **listrik** (LWBP/WBP, kWh), **air** (m³), **gas LPG** (tabung), dan **solar genset** (liter), diimpor dari file Excel dengan pengecekan duplikasi.',
+                "**POMEC** is this system's utility module for recording **electricity** (LWBP/WBP, kWh), **water** (m³), **LPG gas** (cylinders), and **genset diesel** (litres), imported from Excel with duplicate checks."),
             $g('gm', 'GM (General Manager)', ['gm', 'general manager'],
                 '**GM** (General Manager) adalah pimpinan tertinggi operasional hotel. Pada sistem ini GM dapat melihat ringkasan laporan **seluruh departemen** dan ringkasan System Topology secara read-only. GM adalah jabatan, bukan departemen.',
                 "**GM** (General Manager) is the hotel's top operational executive. In this system the GM sees report summaries for **all departments** and a read-only System Topology summary. GM is a role, not a department."),

@@ -14,7 +14,7 @@
             : ($user->isGm() ? 'Executive Dashboard' : ($isEn ? 'Overview' : 'Dashboard')),
         'executive' => 'Executive Dashboard',
         'reports' => $isEn ? 'Department Reports' : 'Laporan Departemen',
-        'pomec' => 'POMEC Utility',
+        'pomec' => 'POMEC Control',
         'topology' => 'System Topology',
         'admin' => 'User Management',
         'audit' => 'Audit Trail',
@@ -26,6 +26,7 @@
         'locale' => $locale,
         'activeTab' => $activeTab,
         'activeReportDept' => $activeReportDept ?? '',
+        'manualReports' => (bool) config('hotel.manual_reports'),
         'accessibleDepts' => ($accessibleDepts ?? $departments)->values(),
         'tabLabels' => $tabLabels,
         'user' => [
@@ -85,14 +86,20 @@
                     {{ $isEn ? 'Main Navigation' : 'Menu Utama' }}
                 </div>
 
+                @php
+                    // POMEC milik Engineering: dibuka dari halaman departemen Engineering, tanpa menu sendiri.
+                    $onReportsArea = in_array($activeTab, ['reports', 'pomec'], true);
+                    $showReportsSubmenu = ($accessibleDepts ?? collect())->count() > 1;
+                @endphp
                 @foreach ($allowedTabs as $tabKey)
+                    @continue($tabKey === 'pomec')
                     @php
-                        $isActive = $activeTab === $tabKey;
+                        $isActive = $activeTab === $tabKey || ($tabKey === 'reports' && $activeTab === 'pomec');
                     @endphp
-                    <button type="button" data-tab="{{ $tabKey }}" onclick="switchWorkspaceTab('{{ $tabKey }}', { toggleSubmenu: true })"
+                    <button type="button" data-tab="{{ $tabKey }}" onclick="{{ $tabKey === 'reports' ? 'openReportsMenu()' : "switchWorkspaceTab('{$tabKey}', { toggleSubmenu: true })" }}"
                         title="{{ $tabLabels[$tabKey] }}"
-                        @if ($tabKey === 'reports' && ($accessibleDepts ?? collect())->count() > 1)
-                            aria-expanded="{{ $activeTab === 'reports' ? 'true' : 'false' }}"
+                        @if ($tabKey === 'reports' && $showReportsSubmenu)
+                            aria-expanded="{{ $onReportsArea ? 'true' : 'false' }}"
                         @endif
                         class="workspace-tab-btn w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer {{ $isActive ? 'bg-navy text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100/80 hover:text-navy' }}">
                         <span class="flex items-center gap-2.5 min-w-0">
@@ -120,8 +127,8 @@
                                 <span id="reports-tab-badge" class="font-mono-num px-1.5 py-0.5 rounded-full text-[10px] bg-crimson text-white leading-none {{ $actionBadgeCount > 0 ? '' : 'hidden' }}">
                                     {{ $actionBadgeCount }}
                                 </span>
-                                @if (($accessibleDepts ?? collect())->count() > 1)
-                                    <svg id="sidebar-reports-chevron" class="w-3.5 h-3.5 opacity-70 transition-transform duration-150 {{ $activeTab === 'reports' ? 'rotate-180' : '' }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                @if ($showReportsSubmenu)
+                                    <svg id="sidebar-reports-chevron" class="w-3.5 h-3.5 opacity-70 transition-transform duration-150 {{ $onReportsArea ? 'rotate-180' : '' }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                                     </svg>
                                 @endif
@@ -129,7 +136,7 @@
                         @endif
                     </button>
 
-                    @if ($tabKey === 'reports' && ($accessibleDepts ?? collect())->count() > 1)
+                    @if ($tabKey === 'reports' && $showReportsSubmenu)
                         @php
                             $currentSidebarDept = $activeReportDept ?? '';
                             $sidebarRowBase = 'sidebar-dept-btn w-full flex items-center gap-2 pl-2 pr-1.5 py-1.5 rounded-lg text-[11px] leading-none transition cursor-pointer';
@@ -138,17 +145,11 @@
                             $sidebarChipBase = 'sidebar-dept-chip shrink-0 inline-flex items-center justify-center w-9 h-5 rounded-md font-mono-num text-[9px] font-bold tracking-wider';
                             $sidebarCountBase = 'shrink-0 inline-flex items-center justify-center min-w-[1.4rem] h-5 px-1.5 rounded-full font-mono-num text-[10px] font-bold leading-none';
                         @endphp
-                        <div id="sidebar-reports-submenu" class="sidebar-text mt-1 ml-4 pl-3 border-l border-slate-200/80 space-y-0.5 pb-1 {{ $activeTab === 'reports' ? '' : 'hidden' }}">
-                            <button type="button" data-sidebar-dept="" onclick="selectReportDepartment('')"
-                                class="{{ $sidebarRowBase }} {{ $currentSidebarDept === '' ? $sidebarRowActive : $sidebarRowIdle }}">
-                                <span class="{{ $sidebarChipBase }} {{ $currentSidebarDept === '' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-500' }}">ALL</span>
-                                <span class="flex-1 min-w-0 truncate text-left">{{ $isEn ? 'All Departments' : 'Semua Dept' }}</span>
-                                <span data-sidebar-dept-count="" class="{{ $sidebarCountBase }} {{ $currentSidebarDept === '' ? 'bg-navy text-white' : 'bg-white border border-slate-200 text-slate-600' }}">{{ $reports->count() }}</span>
-                            </button>
+                        <div id="sidebar-reports-submenu" class="sidebar-text mt-1 ml-4 pl-3 border-l border-slate-200/80 space-y-0.5 pb-1 {{ $onReportsArea ? '' : 'hidden' }}">
                             @foreach ($accessibleDepts as $subDept)
                                 @php
                                     $subCount = $reports->where('department_id', $subDept->id)->count();
-                                    $isSubActive = $activeTab === 'reports' && $currentSidebarDept === $subDept->code;
+                                    $isSubActive = ($activeTab === 'reports' && $currentSidebarDept === $subDept->code) || ($activeTab === 'pomec' && $subDept->code === 'ENG');
                                     $subName = $subDept->localizedName($locale);
                                 @endphp
                                 <button type="button" data-sidebar-dept="{{ $subDept->code }}" onclick="selectReportDepartment('{{ $subDept->code }}')" title="{{ $subName }} ({{ $subCount }})"
@@ -327,7 +328,12 @@
         <!-- Main Executive Content -->
         <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
             <!-- KPI Row (2 cols mobile, 4 cols desktop) -->
-            <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            @php
+                // Ringkasan semua departemen: hanya kalau ada lebih dari satu departemen dan belum memilih salah satu.
+                $showOverview = ($accessibleDepts ?? collect())->count() > 1 && ($activeReportDept ?? '') === '';
+                $hideKpi = $activeTab === 'pomec' || ($activeTab === 'reports' && ! $showOverview);
+            @endphp
+            <section id="report-kpi-row" class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 {{ $hideKpi ? 'hidden' : '' }}">
                 <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-2">
                     <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'Total Reports' : 'Total Laporan' }}</div>
                     <div class="flex items-baseline justify-between">
@@ -363,7 +369,7 @@
 
                 <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-2">
                     @if ($canPomec)
-                        <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'POMEC Electricity (MTD)' : 'POMEC Listrik (MTD)' }}</div>
+                        <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'POMEC Electricity (all data)' : 'POMEC Listrik (semua data)' }}</div>
                         <div class="flex items-baseline justify-between gap-1">
                             <div class="text-xl sm:text-2xl font-heading font-extrabold font-mono-num text-teal">{{ number_format($electricityTotal, 0, ',', '.') }}</div>
                             <span class="text-[11px] font-mono-num text-slate-500">kWh</span>

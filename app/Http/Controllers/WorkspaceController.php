@@ -60,10 +60,17 @@ class WorkspaceController extends Controller
         // POMEC Data (scoped)
         $canPomec = $user->canAccessPomec();
         $pomecImports = $canPomec
-            ? PomecImport::with('uploader')->latest('committed_at')->get()
+            // Hanya nama pengunggah: data akun lain (email, IP login) tidak boleh ikut ke halaman.
+            ? PomecImport::with('uploader:id,name')->latest('committed_at')->get()
             : collect();
-        $pomecRecords = $canPomec
-            ? PomecRecord::with('import')->latest('reading_date')->limit(50)->get()
+        // Bulan harus utuh karena total per bulan dihitung di browser.
+        // ponytail: 13 bulan terakhir (~3.000 baris); ringkas di server kalau datanya membengkak.
+        $latestPomecDate = $canPomec ? PomecRecord::max('reading_date') : null;
+        $pomecRecords = $latestPomecDate
+            ? PomecRecord::whereDate('reading_date', '>=', Carbon::parse($latestPomecDate)->subMonthsNoOverflow(12)->startOfMonth()->toDateString())
+                ->latest('reading_date')
+                // Hanya kolom yang dipakai grafik dan tabel; semuanya dikirim ke browser.
+                ->get(['id', 'pomec_import_id', 'utility_type', 'reading_date', 'meter_name', 'lwbp_value', 'wbp_value', 'water_m3', 'total_usage', 'cost', 'notes'])
             : collect();
 
         $electricityTotal = $canPomec
@@ -172,6 +179,11 @@ class WorkspaceController extends Controller
             : $operationalDepartments->whereIn('id', $accessibleDeptIds)
         )->values();
         $requestedDept = strtoupper(trim((string) $request->query('dept', '')));
+        // Engineering melapor lewat POMEC: halaman departemennya adalah POMEC.
+        $engOnly = $accessibleDepts->count() === 1 && $accessibleDepts->first()->code === 'ENG';
+        if ($canPomec && $activeTab === 'reports' && ($requestedDept === 'ENG' || $engOnly)) {
+            $activeTab = 'pomec';
+        }
         $activeReportDept = ($activeTab === 'reports' && $accessibleDepts->contains(fn ($d) => $d->code === $requestedDept))
             ? $requestedDept
             : '';
@@ -380,7 +392,9 @@ class WorkspaceController extends Controller
      */
     private function buildGmCharts($reports, $pomecRecords, array $hotelPulse): array
     {
+        // Grafik ini hanya Listrik dan Air; tanggal gas/solar tidak boleh ikut mengisi slot (jadi batang nol).
         $byDate = $pomecRecords
+            ->whereIn('utility_type', ['electricity', 'water'])
             ->groupBy(fn (PomecRecord $rec) => $rec->reading_date->format('Y-m-d'))
             ->sortKeys()
             ->slice(-10);

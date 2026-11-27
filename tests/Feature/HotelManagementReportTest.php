@@ -4,14 +4,19 @@ namespace Tests\Feature;
 
 use App\Models\Department;
 use App\Models\DepartmentReport;
+use App\Models\PomecImport;
+use App\Models\PomecRecord;
 use App\Models\ReportTemplate;
 use App\Models\TopologyComponent;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
+use Database\Seeders\PomecNovemberSampleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
@@ -23,6 +28,8 @@ class HotelManagementReportTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Alur form manual tetap diuji; default aplikasi mematikannya (lihat test khusus di bawah).
+        config(['hotel.manual_reports' => true]);
         $this->seed(DatabaseSeeder::class);
     }
 
@@ -99,20 +106,22 @@ class HotelManagementReportTest extends TestCase
 
     public function test_department_template_schema_validation_draft_deletion_and_hod_review_workflow(): void
     {
-        $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
-        $hodEng = User::where('email', 'hod.eng@swissbel.local')->firstOrFail();
+        $staffEng = User::where('email', 'staff.fo@swissbel.local')->firstOrFail();
+        $hodEng = User::where('email', 'hod.fo@swissbel.local')->firstOrFail();
         $gm = User::where('email', 'gm@swissbel.local')->firstOrFail();
-        $foTemplate = ReportTemplate::where('code', 'FO-OCCUPANCY')->firstOrFail();
-        $engTemplate = ReportTemplate::where('code', 'ENG-MAINT')->firstOrFail();
+        // Engineering melapor lewat POMEC; alur laporan manual diuji dengan Front Office.
+        $foTemplate = ReportTemplate::where('code', 'HK-STATUS')->firstOrFail();
+        $engTemplate = ReportTemplate::where('code', 'FO-OCCUPANCY')->firstOrFail();
+        $this->assertFalse(ReportTemplate::where('code', 'ENG-MAINT')->value('is_active'));
 
-        // Staff Engineering cannot create report using Front Office template
+        // Staff Front Office cannot create report using Housekeeping template
         $this->actingAs($staffEng)
             ->postJson('/reports', [
                 'report_template_id' => $foTemplate->id,
                 'title' => 'Unauthorized FO Report',
                 'period_type' => 'daily',
                 'period_date' => '2026-11-19',
-                'rows_data' => json_encode([['room_type' => 'Deluxe', 'available' => 10, 'occupied' => 5, 'arrivals' => 2, 'departures' => 1]]),
+                'rows_data' => json_encode([['floor' => 'Lt 3', 'vc' => 1, 'vd' => 0, 'oc' => 2, 'ooo' => 0]]),
                 'intent' => 'draft',
             ])
             ->assertStatus(403);
@@ -125,7 +134,7 @@ class HotelManagementReportTest extends TestCase
                 'period_type' => 'daily',
                 'period_date' => '2026-11-19',
                 'rows_data' => json_encode([
-                    ['equipment' => 'Chiller #2', 'location' => 'Rooftop', 'condition' => 'InvalidOption', 'downtime_min' => 'abc'],
+                    ['room_type' => 'Deluxe', 'available' => 'abc', 'occupied' => 5, 'arrivals' => 2, 'departures' => 1],
                 ]),
                 'intent' => 'draft',
             ])
@@ -139,7 +148,7 @@ class HotelManagementReportTest extends TestCase
                 'period_type' => 'daily',
                 'period_date' => '2026-11-19',
                 'rows_data' => json_encode([
-                    ['equipment' => 'Genset #1', 'location' => 'Basement', 'condition' => 'Normal', 'downtime_min' => 0, 'action_taken' => 'OK'],
+                    ['room_type' => 'Deluxe', 'available' => 10, 'occupied' => 5, 'arrivals' => 2, 'departures' => 1, 'vip_notes' => 'OK'],
                 ]),
                 'intent' => 'draft',
             ])
@@ -149,7 +158,7 @@ class HotelManagementReportTest extends TestCase
         $this->actingAs($staffEng)->deleteJson("/reports/{$draftId}")->assertOk();
         $this->assertNull(DepartmentReport::find($draftId));
 
-        // Staff Engineering creates and submits an ENG-MAINT report
+        // Staff Front Office creates and submits a report
         $createRes = $this->actingAs($staffEng)
             ->postJson('/reports', [
                 'report_template_id' => $engTemplate->id,
@@ -157,7 +166,7 @@ class HotelManagementReportTest extends TestCase
                 'period_type' => 'daily',
                 'period_date' => '2026-11-19',
                 'rows_data' => json_encode([
-                    ['equipment' => 'Chiller #2', 'location' => 'Rooftop', 'condition' => 'Normal', 'downtime_min' => 0, 'action_taken' => 'OK'],
+                    ['room_type' => 'Deluxe', 'available' => 10, 'occupied' => 8, 'arrivals' => 3, 'departures' => 2, 'vip_notes' => 'OK'],
                 ]),
                 'summary_notes' => 'Semua parameter stabil.',
                 'intent' => 'submit',
@@ -175,12 +184,12 @@ class HotelManagementReportTest extends TestCase
             ->postJson("/reports/{$reportId}/review", ['decision' => 'reviewed'])
             ->assertStatus(403);
 
-        // HOD Engineering returning a report without note gets 422
+        // HOD Front Office returning a report without note gets 422
         $this->actingAs($hodEng)
             ->postJson("/reports/{$reportId}/review", ['decision' => 'returned', 'review_note' => ''])
             ->assertStatus(422);
 
-        // HOD Engineering starts review (Stage 3: Review), then marks report as reviewed (Stage 4B/5)
+        // HOD Front Office starts review (Stage 3: Review), then marks report as reviewed (Stage 4B/5)
         $this->actingAs($hodEng)
             ->postJson("/reports/{$reportId}/review", [
                 'decision' => 'in_review',
@@ -192,7 +201,7 @@ class HotelManagementReportTest extends TestCase
         $this->actingAs($hodEng)
             ->postJson("/reports/{$reportId}/review", [
                 'decision' => 'reviewed',
-                'review_note' => 'Terverifikasi oleh HOD Engineering.',
+                'review_note' => 'Terverifikasi oleh HOD Front Office.',
             ])
             ->assertOk()
             ->assertJsonPath('report.status', 'reviewed');
@@ -210,49 +219,131 @@ class HotelManagementReportTest extends TestCase
         Storage::fake('local');
         $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
 
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->fromArray(['Tanggal', 'Meter', 'LWBP', 'WBP', 'Catatan'], null, 'A1');
-        $sheet->fromArray(['2026-11-25', 'Main Panel Test', 1500, 350, 'Uji impor'], null, 'A2');
+        // Tata letak mini mengikuti file asli: nilai langsung di sel yang dibaca parser.
+        $day = fn (int $d) => Date::PHPToExcel("2026-10-{$d} 00:00:00");
+        $files = [
+            'electricity' => [
+                'Electric consumtion Gedung' => ['A7' => [[$day(1), 100, 110, 20, 20700, 50, 55, 10, 15530, 36230]]],
+                // Di sheet Laundry kolom D = WBP dan H = LWBP; baris kedua belum punya angka akhir.
+                'Electric consumtion Laundry' => ['A7' => [
+                    [$day(1), 10, 11, 5, 500, 20, 21, 40, 4000, 4500],
+                    [$day(2), 11, 0, -440, -1, 21, 0, -840, -1, -2],
+                ]],
+            ],
+            'water' => [
+                'Pemakaian air gedung' => ['B5' => [[$day(1), 100, 110, 10, 230000]]],
+                'Pemakaian air Laundry' => ['B5' => [[$day(1), 5, 7, 2, 22332]]],
+                // Jumlah tangki kosong = belum diisi.
+                'Tangki' => ['B4' => [[$day(1), 8, 64, 3000000], [$day(2), null, 0, 0]]],
+            ],
+            'gas' => [
+                'Sheet1' => [
+                    'A3' => [['MONTH : OCTOBER 2026']],
+                    'A6' => [
+                        [1, '07,00', null, null, null, 8, null, null, null, 4, 'Ganti Gas'],
+                        [null, '15,00', null, null, null, 8, null, null, null, 2],
+                        [null, null, null, null, null, null, null, null, 'Total', 6],
+                    ],
+                ],
+            ],
+            'solar' => [
+                // Baris 2 Oktober dilewati karena stok 3 Oktober belum diisi.
+                'SOLAR' => ['B5' => [[$day(1), 1000, 500, 1500, 100], [$day(2), 900, 500, 1400, 1400], [$day(3), null, null, 0, 0]]],
+            ],
+        ];
+        $expected = [
+            'electricity' => ['rows' => 2, 'usage' => 75, 'cost' => 40730],
+            'water' => ['rows' => 3, 'usage' => 76, 'cost' => 3252332],
+            'gas' => ['rows' => 1, 'usage' => 6, 'cost' => null],
+            'solar' => ['rows' => 1, 'usage' => 100, 'cost' => null],
+        ];
 
-        $tmpPath = sys_get_temp_dir().'/pomec_test_'.uniqid().'.xlsx';
-        (new Xlsx($spreadsheet))->save($tmpPath);
+        foreach ($files as $type => $sheets) {
+            $spreadsheet = new Spreadsheet;
+            $spreadsheet->removeSheetByIndex(0);
+            foreach ($sheets as $title => $blocks) {
+                $sheet = $spreadsheet->createSheet()->setTitle($title);
+                foreach ($blocks as $cell => $data) {
+                    $sheet->fromArray($data, null, $cell, true);
+                }
+            }
+            $tmpPath = sys_get_temp_dir().'/pomec_test_'.uniqid().'.xlsx';
+            (new Xlsx($spreadsheet))->save($tmpPath);
+            $upload = fn () => ['utility_type' => $type, 'period_month' => '2026-10', 'excel_file' => new UploadedFile($tmpPath, "{$type}.xlsx", null, null, true)];
 
-        $upload = new UploadedFile($tmpPath, 'pomec_test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+            $previewRes = $this->actingAs($staffEng)
+                ->post('/pomec/preview', $upload())
+                ->assertOk()
+                ->assertJsonPath('preview.is_duplicate_file', false)
+                ->assertJsonPath('preview.valid_count', $expected[$type]['rows'])
+                ->assertJsonPath('preview.error_count', 0);
 
-        $previewRes = $this->actingAs($staffEng)
-            ->post('/pomec/preview', [
-                'utility_type' => 'electricity',
-                'period_month' => '2026-11',
-                'excel_file' => $upload,
-            ])
+            $committed = $this->actingAs($staffEng)
+                ->postJson('/pomec/commit', ['preview_token' => $previewRes->json('preview_token')])
+                ->assertStatus(201);
+            // Tanggal polos (tanpa jam/zona) dan data akun pengunggah tidak ikut terkirim.
+            $this->assertMatchesRegularExpression('/^2026-10-\d{2}$/', $committed->json('import.records.0.reading_date'), $type);
+            $this->assertSame(['id', 'name'], array_keys($committed->json('import.uploader')), $type);
+
+            $import = PomecImport::where('utility_type', $type)->latest('id')->firstOrFail();
+            $this->assertEqualsWithDelta($expected[$type]['usage'], (float) $import->total_usage, 0.01, $type);
+            $this->assertEquals($expected[$type]['cost'], $import->total_cost === null ? null : (float) $import->total_cost, $type);
+
+            // Uploading identical file again must flag SHA-256 duplicate and duplicate rows
+            $this->actingAs($staffEng)
+                ->post('/pomec/preview', $upload())
+                ->assertOk()
+                ->assertJsonPath('preview.is_duplicate_file', true)
+                ->assertJsonPath('preview.duplicate_row_count', $expected[$type]['rows']);
+
+            // Periode yang tidak ada di file ditolak dengan pesan, bukan error server
+            $this->actingAs($staffEng)
+                ->post('/pomec/preview', ['period_month' => '2026-09'] + $upload())
+                ->assertOk()
+                ->assertJsonPath('preview.valid_count', 0)
+                ->assertJsonPath('preview.error_count', 1);
+
+            $tmpPaths[] = $tmpPath;
+
+            $this->actingAs($staffEng)->get("/pomec/export/{$type}/excel")->assertOk()->streamedContent();
+            $this->actingAs($staffEng)->get("/pomec/export/{$type}/pdf?period_month=2026-10")->assertOk()->assertDownload("pomec_{$type}_2026-10.pdf");
+        }
+
+        $this->assertEquals(40, (float) PomecRecord::where('meter_name', 'PLN Laundry')->value('lwbp_value'));
+        $this->actingAs($staffEng)->get('/?tab=pomec')->assertOk()->assertSee('PLN Laundry')->assertSee('Gas LPG');
+
+        // Tanggal gas yang lebih baru tidak boleh menggeser grafik Listrik/Air di dashboard GM.
+        $gm = User::where('email', 'gm@swissbel.local')->firstOrFail();
+        PomecRecord::where('utility_type', 'gas')->firstOrFail()->replicate()
+            ->fill(['reading_date' => '2026-12-31', 'transaction_hash' => hash('sha256', 'gas-later')])
+            ->save();
+        $dashboard = $this->actingAs($gm)->get('/?tab=dashboard')->assertOk();
+        $this->assertNotContains('31 Dec', $dashboard->viewData('gmCharts')['pomec']['labels']);
+        $this->assertSame(['id', 'name'], array_keys($dashboard->viewData('pomecImports')->first()->uploader->toArray()));
+        $this->assertArrayNotHasKey('transaction_hash', $dashboard->viewData('pomecRecords')->first()->toArray());
+
+        // Hapus batch: hanya HOD Engineering / IT Admin. $upload masih menunjuk file solar.
+        $hodEng = User::where('email', 'hod.eng@swissbel.local')->firstOrFail();
+        $solar = PomecImport::where('utility_type', 'solar')->firstOrFail();
+        $this->actingAs($staffEng)->deleteJson("/pomec/imports/{$solar->id}")->assertForbidden();
+        $this->actingAs($gm)->deleteJson("/pomec/imports/{$solar->id}")->assertForbidden();
+        Storage::disk('local')->assertExists($solar->stored_path);
+
+        $this->actingAs($hodEng)->deleteJson("/pomec/imports/{$solar->id}")->assertOk();
+        $this->assertModelMissing($solar);
+        $this->assertSame(0, PomecRecord::where('pomec_import_id', $solar->id)->count());
+        $this->assertDatabaseHas('audit_logs', ['event' => 'pomec.import.deleted', 'user_id' => $hodEng->id]);
+        Storage::disk('local')->assertMissing($solar->stored_path);
+        $this->assertCount(1, Storage::disk('local')->files('pomec/deleted'));
+
+        // Setelah dihapus, file yang sama bisa diunggah lagi dengan kode batch baru.
+        $again = $this->actingAs($staffEng)->post('/pomec/preview', $upload())
             ->assertOk()
             ->assertJsonPath('preview.is_duplicate_file', false)
             ->assertJsonPath('preview.valid_count', 1);
-
-        $token = $previewRes->json('preview_token');
-
-        $this->actingAs($staffEng)
-            ->postJson('/pomec/commit', ['preview_token' => $token])
-            ->assertStatus(201);
-
-        // Uploading identical file again must flag SHA-256 duplicate
-        $duplicateUpload = new UploadedFile($tmpPath, 'pomec_test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
-
-        $this->actingAs($staffEng)
-            ->post('/pomec/preview', [
-                'utility_type' => 'electricity',
-                'period_month' => '2026-11',
-                'excel_file' => $duplicateUpload,
-            ])
-            ->assertOk()
-            ->assertJsonPath('preview.is_duplicate_file', true);
-
-        @unlink($tmpPath);
-
-        $this->actingAs($staffEng)->get('/pomec/template/electricity')->assertOk();
-        $this->actingAs($staffEng)->get('/pomec/export/electricity/excel')->assertOk();
-        $this->actingAs($staffEng)->get('/pomec/export/electricity/pdf')->assertOk();
+        $this->actingAs($staffEng)->postJson('/pomec/commit', ['preview_token' => $again->json('preview_token')])->assertStatus(201);
+        $this->assertNotSame($solar->batch_code, PomecImport::where('utility_type', 'solar')->firstOrFail()->batch_code);
+        array_map('unlink', $tmpPaths);
 
         // Test temp cleanup artisan command
         Storage::disk('local')->put('pomec/tmp/fresh.xlsx', 'ok');
@@ -405,39 +496,188 @@ class HotelManagementReportTest extends TestCase
             ->assertJsonPath('report.status', 'submitted');
     }
 
-    public function test_pomec_water_import_and_admin_user_lifecycle(): void
+    public function test_pomec_daily_upload_saves_only_new_dates_and_flags_changes(): void
+    {
+        Storage::fake('local');
+        Carbon::setTestNow('2026-10-04 09:00:00');
+        $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
+        PomecRecord::query()->delete();
+
+        // Satu baris listrik Gedung: tanggal, LWBP awal/akhir/selisih/biaya, WBP awal/akhir/selisih/biaya, total biaya.
+        $gedung = fn (int $d, float $lwbp) => [Date::PHPToExcel("2026-10-0{$d} 00:00:00"), 100, 110, $lwbp, 1000, 50, 55, 20, 2000, 3000];
+        $laundry = [Date::PHPToExcel('2026-10-01 00:00:00'), 10, 11, 5, 500, 20, 21, 40, 4000, 4500];
+        $upload = function (array $gedungRows) use ($laundry) {
+            $spreadsheet = new Spreadsheet;
+            $spreadsheet->getActiveSheet()->setTitle('Electric consumtion Gedung')->fromArray($gedungRows, null, 'A7', true);
+            $spreadsheet->createSheet()->setTitle('Electric consumtion Laundry')->fromArray([$laundry], null, 'A7', true);
+            $path = sys_get_temp_dir().'/pomec_daily_'.uniqid().'.xlsx';
+            (new Xlsx($spreadsheet))->save($path);
+
+            return ['utility_type' => 'electricity', 'period_month' => '2026-10', 'excel_file' => new UploadedFile($path, 'PLN.xlsx', null, null, true)];
+        };
+
+        // Hari pertama: tanggal 1.
+        $first = $this->actingAs($staffEng)->post('/pomec/preview', $upload([$gedung(1, 100)]))->assertOk()->assertJsonPath('preview.valid_count', 2);
+        $this->actingAs($staffEng)->postJson('/pomec/commit', ['preview_token' => $first->json('preview_token')])
+            ->assertStatus(201)
+            ->assertJsonPath('message', fn (string $m) => str_starts_with($m, '2 data Listrik 1 Oktober 2026 dikirim ke HOD (RPT-ENG-'));
+
+        // Beberapa hari kemudian file yang sama sudah bertambah. Tanggal 1 Gedung dikoreksi, tanggal 3 belum terbaca, tanggal 5 belum terjadi.
+        $second = $this->actingAs($staffEng)->post('/pomec/preview', $upload([$gedung(1, 101), $gedung(2, 90), $gedung(4, 95), $gedung(5, 80)]))
+            ->assertOk()
+            ->assertJsonPath('preview.valid_count', 2)
+            ->assertJsonPath('preview.existing_count', 1)
+            ->assertJsonPath('preview.changed_count', 1)
+            ->assertJsonPath('preview.error_count', 1)
+            ->assertJsonPath('preview.missing_dates', ['2026-10-03'])
+            ->assertJsonPath('preview.last_saved_date', '2026-10-01');
+        $this->actingAs($staffEng)->postJson('/pomec/commit', ['preview_token' => $second->json('preview_token')])
+            ->assertStatus(201)
+            ->assertJsonPath('message', fn (string $m) => str_starts_with($m, '2 data Listrik 2–4 Oktober 2026 dikirim ke HOD (RPT-ENG-'));
+
+        // Angka lama tidak ditimpa; hanya tanggal 2 dan 4 yang bertambah.
+        $this->assertEquals(120, (float) PomecRecord::where('meter_name', 'PLN Gedung')->whereDate('reading_date', '2026-10-01')->value('total_usage'));
+        $this->assertSame(4, PomecRecord::count());
+        Carbon::setTestNow();
+    }
+
+    public function test_pomec_upload_is_an_engineering_report_with_draft_review_and_reupload(): void
+    {
+        Storage::fake('local');
+        Carbon::setTestNow('2026-10-10 09:00:00');
+        $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
+        $hodEng = User::where('email', 'hod.eng@swissbel.local')->firstOrFail();
+        PomecRecord::query()->delete();
+
+        // File solar: tanggal, stok tangki biru, stok tangki merah, total stok, pemakaian.
+        $upload = function (array $rows, ?int $replace = null) {
+            $spreadsheet = new Spreadsheet;
+            $spreadsheet->getActiveSheet()->setTitle('SOLAR')->fromArray($rows, null, 'B5', true);
+            $path = sys_get_temp_dir().'/pomec_report_'.uniqid().'.xlsx';
+            (new Xlsx($spreadsheet))->save($path);
+
+            return array_filter([
+                'utility_type' => 'solar',
+                'period_month' => '2026-10',
+                'replace_report_id' => $replace,
+                'excel_file' => new UploadedFile($path, 'Solar.xlsx', null, null, true),
+            ]);
+        };
+        $day = fn (int $d) => Date::PHPToExcel("2026-10-0{$d} 00:00:00");
+
+        // Simpan sebagai draft: satu unggahan = satu laporan Engineering, kolom sesuai solar.
+        $preview = $this->actingAs($staffEng)->post('/pomec/preview', $upload([[$day(1), 1000, 0, 1000, 40], [$day(2), 960, 0, 960, 0]]))->assertOk();
+        $draft = $this->actingAs($staffEng)
+            ->postJson('/pomec/commit', ['preview_token' => $preview->json('preview_token'), 'intent' => 'draft'])
+            ->assertStatus(201)
+            ->assertJsonPath('report.status', 'draft')
+            ->assertJsonPath('report.department.code', 'ENG')
+            ->assertJsonPath('report.template.code', 'ENG-POMEC-SOL')
+            ->assertJsonPath('report.rows_data.0.total_usage', 40)
+            ->assertJsonPath('import.report.status', 'draft');
+        $reportId = $draft->json('report.id');
+        $this->assertSame(['reading_date', 'total_usage', 'notes'], array_column($draft->json('report.template.columns_schema'), 'key'));
+
+        // Isi laporan POMEC tidak bisa diubah lewat form; draft dikirim ke HOD.
+        $this->actingAs($staffEng)->postJson("/reports/{$reportId}", [
+            'title' => 'X', 'period_type' => 'daily', 'period_date' => '2026-10-01', 'rows_data' => '[]', 'intent' => 'submit',
+        ])->assertStatus(422);
+        $this->actingAs($hodEng)->postJson("/reports/{$reportId}/submit")->assertOk()->assertJsonPath('report.status', 'submitted');
+        $this->actingAs($staffEng)->postJson("/reports/{$reportId}/submit")->assertForbidden();
+
+        // Unggah ulang hanya untuk laporan yang dikembalikan.
+        $this->actingAs($staffEng)->post('/pomec/preview', $upload([[$day(1), 1000, 0, 1000, 30]], $reportId))->assertStatus(422);
+        $this->actingAs($hodEng)->postJson("/reports/{$reportId}/review", ['decision' => 'returned', 'review_note' => 'Pemakaian tanggal 1 salah.'])->assertOk();
+
+        // File perbaikan: tanggal yang sama dianggap baru, laporan yang sama kembali Submitted, batch lama hilang.
+        $oldImportId = DepartmentReport::findOrFail($reportId)->pomec_import_id;
+        $fixed = $this->actingAs($staffEng)->post('/pomec/preview', $upload([[$day(1), 1000, 0, 1000, 30], [$day(2), 970, 0, 970, 0]], $reportId))
+            ->assertOk()
+            ->assertJsonPath('preview.valid_count', 2)
+            ->assertJsonPath('preview.existing_count', 0);
+        $this->actingAs($staffEng)->postJson('/pomec/commit', ['preview_token' => $fixed->json('preview_token')])
+            ->assertStatus(201)
+            ->assertJsonPath('report.id', $reportId)
+            ->assertJsonPath('report.status', 'submitted')
+            ->assertJsonPath('replaced_import_id', $oldImportId);
+        $this->assertNull(PomecImport::find($oldImportId));
+        $this->assertEquals(30, (float) PomecRecord::whereDate('reading_date', '2026-10-01')->value('total_usage'));
+        $this->assertSame(['created', 'submitted', 'returned', 'submitted'], DepartmentReport::findOrFail($reportId)->histories()->reorder('id')->pluck('action')->all());
+
+        $this->actingAs($hodEng)->postJson("/reports/{$reportId}/review", ['decision' => 'reviewed'])->assertOk()->assertJsonPath('report.status', 'reviewed');
+        $this->actingAs($hodEng)->get("/reports/{$reportId}/export/excel")->assertOk();
+
+        // Draft POMEC yang dihapus ikut menghapus unggahannya.
+        $other = $this->actingAs($staffEng)->post('/pomec/preview', $upload([[$day(3), 970, 0, 970, 10], [$day(4), 960, 0, 960, 0]]))->assertOk();
+        $otherReport = $this->actingAs($staffEng)
+            ->postJson('/pomec/commit', ['preview_token' => $other->json('preview_token'), 'intent' => 'draft'])
+            ->json('report');
+        $this->actingAs($staffEng)->deleteJson("/reports/{$otherReport['id']}")->assertOk();
+        $this->assertNull(PomecImport::find($otherReport['pomec_import_id']));
+        $this->assertNull(DepartmentReport::find($otherReport['id']));
+        Carbon::setTestNow();
+    }
+
+    public function test_manual_report_form_is_hidden_but_old_reports_stay_reviewable(): void
+    {
+        config(['hotel.manual_reports' => false]);
+        $staffFo = User::where('email', 'staff.fo@swissbel.local')->firstOrFail();
+        $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
+        $returned = DepartmentReport::where('status', 'returned')->firstOrFail();
+        $author = User::findOrFail($returned->created_by);
+
+        $this->actingAs($staffFo)->get('/?tab=reports')->assertOk()
+            ->assertDontSee('onclick="openReportEditor', false)
+            ->assertDontSee('createReportForActiveDept()', false);
+        // Unggah hanya ada di dalam POMEC Control milik Engineering, bukan tombol umum.
+        $this->actingAs($staffEng)->get('/?tab=pomec')->assertOk()->assertSee('id="pomec-upload-toggle"', false)->assertDontSee('openPomecUploadPage', false);
+        $this->actingAs($staffFo)->get('/?tab=dashboard')->assertOk()->assertDontSee('id="pomec-upload-toggle"', false);
+
+        $this->actingAs($staffFo)->postJson('/reports', [
+            'report_template_id' => ReportTemplate::where('code', 'FO-OCCUPANCY')->value('id'),
+            'title' => 'X', 'period_type' => 'daily', 'period_date' => '2026-11-19',
+            'rows_data' => json_encode([['room_type' => 'Deluxe', 'available' => 1, 'occupied' => 1, 'arrivals' => 0, 'departures' => 0]]),
+            'intent' => 'draft',
+        ])->assertForbidden();
+        $this->assertFalse($returned->isEditableBy($author));
+        $this->actingAs($author)->get("/reports/{$returned->id}/export/excel")->assertOk();
+    }
+
+    public function test_pomec_november_sample_seeder_replaces_demo_and_is_repeatable(): void
+    {
+        // Satu pembacaan Oktober sebagai sumber, ditempelkan ke batch yang sudah ada.
+        PomecRecord::create([
+            'pomec_import_id' => PomecImport::firstOrFail()->id,
+            'utility_type' => 'electricity',
+            'reading_date' => '2026-10-05',
+            'meter_name' => 'PLN Gedung',
+            'lwbp_value' => 1000,
+            'wbp_value' => 200,
+            'total_usage' => 1200,
+            'cost' => 1500000,
+            'transaction_hash' => hash('sha256', 'electricity|2026-10-05|PLN Gedung'),
+        ]);
+        $source = PomecImport::firstOrFail();
+        $source->update(['file_hash_sha256' => hash('sha256', 'file-oktober'), 'batch_code' => 'POMEC-ELC-202610-01']);
+        $source->records()->whereDate('reading_date', '>=', '2026-11-01')->delete();
+
+        $this->seed(PomecNovemberSampleSeeder::class);
+        $this->seed(PomecNovemberSampleSeeder::class);
+
+        $november = PomecRecord::whereDate('reading_date', '>=', '2026-11-01')->get();
+        // Data contoh lama (air) ikut terganti; karena tidak ada air di sumber, tinggal listrik.
+        $this->assertCount(1, $november);
+        $this->assertSame('2026-11-05', $november[0]->reading_date->format('Y-m-d'));
+        $this->assertEqualsWithDelta(1200, (float) $november[0]->total_usage, 120);
+        $this->assertEqualsWithDelta((float) $november[0]->total_usage * 1250, (float) $november[0]->cost, 0.05);
+        $this->assertSame(1, PomecImport::where('batch_code', 'POMEC-ELC-202611-CONTOH')->count());
+    }
+
+    public function test_admin_user_lifecycle(): void
     {
         Storage::fake('local');
         $staffEng = User::where('email', 'staff.eng@swissbel.local')->firstOrFail();
         $itAdmin = User::where('email', 'it.admin@swissbel.local')->firstOrFail();
-
-        // Water Excel upload & commit
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->fromArray(['Tanggal', 'Meter', 'Pemakaian Air (m3)', 'Catatan'], null, 'A1');
-        $sheet->fromArray(['2026-11-26', 'PDAM Main Meter', 105.5, 'Water test'], null, 'A2');
-
-        $tmpPath = sys_get_temp_dir().'/pomec_water_'.uniqid().'.xlsx';
-        (new Xlsx($spreadsheet))->save($tmpPath);
-
-        $upload = new UploadedFile($tmpPath, 'water_test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
-
-        $previewRes = $this->actingAs($staffEng)
-            ->post('/pomec/preview', [
-                'utility_type' => 'water',
-                'period_month' => '2026-11',
-                'excel_file' => $upload,
-            ])
-            ->assertOk()
-            ->assertJsonPath('preview.valid_count', 1);
-
-        $this->actingAs($staffEng)
-            ->postJson('/pomec/commit', ['preview_token' => $previewRes->json('preview_token')])
-            ->assertStatus(201);
-
-        @unlink($tmpPath);
-        $this->actingAs($staffEng)->get('/pomec/export/water/excel')->assertOk();
-        $this->actingAs($staffEng)->get('/pomec/export/water/pdf')->assertOk();
 
         // IT Admin creates user (HOD without department_id rejected 422)
         $this->actingAs($itAdmin)
@@ -532,7 +772,7 @@ class HotelManagementReportTest extends TestCase
             ->assertSee('FO • OCCUPANCY', false)
             ->assertSee('F&amp;B • REVENUE', false)
             ->assertSee('Matriks Kepatuhan Laporan 7 Departemen')
-            ->assertSee('Ringkasan Eksekutif Energi &amp; Air (POMEC)', false)
+            ->assertSee('Ringkasan Eksekutif Energi &amp; Air (POMEC Control)', false)
             ->assertSee('Ringkasan Hasil Bisnis &amp; SDM', false)
             ->assertSee('System Topology')
             ->assertDontSee('Admin &amp; General', false)
@@ -574,9 +814,8 @@ class HotelManagementReportTest extends TestCase
         $this->actingAs($itAdmin)
             ->get('/?tab=reports')
             ->assertOk()
-            ->assertSee('reports-dept-submenu')
+            ->assertSee('reports-overview-cards')
             ->assertSee('sidebar-reports-submenu')
-            ->assertDontSee('data-dept-tab="ANG"', false)
             ->assertDontSee('data-sidebar-dept="ANG"', false)
             ->assertSee('RPT-ENG-202611-001')
             ->assertSee('RPT-FO-202611-002')
@@ -613,11 +852,18 @@ class HotelManagementReportTest extends TestCase
             ->assertSee('gm@swissbel.local')
             ->assertSee('hod.eng@swissbel.local');
 
+        // Staf satu departemen langsung ke halaman departemennya; Engineering punya pengalih ke POMEC.
         $this->actingAs($staffEng)
             ->get('/?tab=reports')
             ->assertOk()
-            ->assertDontSee('id="reports-dept-submenu"', false)
-            ->assertDontSee('id="sidebar-reports-submenu"', false);
+            ->assertDontSee('id="reports-overview"', false)
+            ->assertDontSee('id="sidebar-reports-submenu"', false)
+            ->assertSee('"activeTab":"pomec"', false);
+        $this->actingAs($itAdmin)->get('/?tab=reports&dept=ENG')->assertOk()->assertSee('"activeTab":"pomec"', false);
+        $this->actingAs(User::where('email', 'staff.fo@swissbel.local')->firstOrFail())
+            ->get('/?tab=reports')
+            ->assertOk()
+            ->assertSee('"activeTab":"reports"', false);
 
         $this->actingAs($staffEng)
             ->get('/?tab=dashboard')
