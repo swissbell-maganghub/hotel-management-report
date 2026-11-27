@@ -26,6 +26,7 @@ Route::middleware(['auth', 'active'])->group(function (): void {
     // Departmental Reports (Dynamic Per-Department Table Templates + Workflow)
     Route::post('/reports', [DepartmentReportController::class, 'store'])->name('reports.store');
     Route::post('/reports/{report}', [DepartmentReportController::class, 'update'])->name('reports.update');
+    Route::post('/reports/{report}/submit', [DepartmentReportController::class, 'submit'])->name('reports.submit');
     Route::post('/reports/{report}/review', [DepartmentReportController::class, 'review'])->name('reports.review');
     Route::delete('/reports/{report}', [DepartmentReportController::class, 'destroy'])->name('reports.destroy');
     Route::get('/reports/{report}/export/excel', [DepartmentReportController::class, 'exportExcel'])->name('reports.export.excel');

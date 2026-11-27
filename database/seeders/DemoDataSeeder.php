@@ -10,6 +10,7 @@ use App\Models\PomecRecord;
 use App\Models\ReportHistory;
 use App\Models\ReportTemplate;
 use App\Models\User;
+use App\Services\PomecExcelService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -322,6 +323,9 @@ class DemoDataSeeder extends Seeder
                 ]);
             }
         }
+
+        // Setiap unggahan POMEC punya laporan Engineering (alur Draft → Reviewed).
+        app(PomecExcelService::class)->syncReports();
 
         if (AuditLog::count() === 0) {
             AuditLog::record($users['staff_eng'], 'pomec.import', 'POMEC', 'Mengimpor file pomec_electricity_nov2026_w1_w3.xlsx (5 baris, SHA-256 terverifikasi).');

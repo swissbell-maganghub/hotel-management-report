@@ -170,6 +170,10 @@ class User extends Authenticatable
 
     public function canCreateReports(): bool
     {
+        if (! config('hotel.manual_reports')) {
+            return false;
+        }
+
         return $this->isItAdmin() || count($this->inputtableDepartmentIds()) > 0;
     }
 

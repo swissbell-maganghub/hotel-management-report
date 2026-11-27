@@ -32,7 +32,8 @@ class PomecRecord extends Model
     protected function casts(): array
     {
         return [
-            'reading_date' => 'date',
+            // Y-m-d: browser tidak perlu konversi zona waktu per baris.
+            'reading_date' => 'date:Y-m-d',
             'lwbp_value' => 'decimal:2',
             'wbp_value' => 'decimal:2',
             'water_m3' => 'decimal:2',

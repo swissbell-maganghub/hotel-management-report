@@ -1050,8 +1050,8 @@ class ChatbotService
                         : 'Asisten AI berjalan lokal di server internal hotel (bersifat read-only, mengikuti hak akses RBAC pengguna, tanpa mengirim data operasional keluar jaringan hotel).'),
                 'workflow_stages' => 'Draft -> Submitted -> In Review (HOD) -> Returned / Reviewed -> Management Monitoring',
                 'main_tabs' => $isEn
-                    ? 'Dashboard (KPI summary, pending reviews, report history shortcut), Department Reports (create, HOD review, PDF/Excel export, history), POMEC Utility (Excel upload & electricity/water charts), System Topology, AI Report Assistant'
-                    : 'Dashboard (ringkasan KPI, antrean review, pintasan histori laporan), Laporan Departemen (input, review HOD, ekspor PDF/Excel, histori), Utilitas POMEC (unggah Excel & grafik listrik/air), Topologi Sistem, Asisten AI Laporan',
+                    ? 'Dashboard (KPI summary, pending reviews, report history shortcut), Department Reports (create, HOD review, PDF/Excel export, history), POMEC Control (Excel upload & electricity/water charts), System Topology, AI Report Assistant'
+                    : 'Dashboard (ringkasan KPI, antrean review, pintasan histori laporan), Laporan Departemen (input, review HOD, ekspor PDF/Excel, histori), POMEC Control (unggah Excel & grafik listrik/air), Topologi Sistem, Asisten AI Laporan',
                 'role_permissions' => $isEn
                     ? 'Staff: create/edit own dept Draft & Returned only; HOD: review/return own dept; GM: read-only monitor all depts; IT Admin: system/users/KB/topology'
                     : 'Staff: buat/edit Draft & Returned departemen sendiri; HOD: review/kembalikan departemen sendiri; GM: monitor read-only semua departemen; IT Admin: sistem/user/KB/topologi',

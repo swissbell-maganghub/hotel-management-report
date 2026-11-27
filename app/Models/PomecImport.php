@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class PomecImport extends Model
 {
@@ -35,6 +36,12 @@ class PomecImport extends Model
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    /** Laporan Engineering (alur Draft → Reviewed) untuk unggahan ini. */
+    public function report(): HasOne
+    {
+        return $this->hasOne(DepartmentReport::class);
     }
 
     public function records(): HasMany

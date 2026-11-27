@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DepartmentReport;
 use App\Models\PomecImport;
 use App\Models\PomecRecord;
 use App\Models\User;
@@ -26,13 +27,21 @@ class PomecController extends Controller
             'utility_type' => ['required', Rule::in(array_keys(PomecRecord::TYPES))],
             'period_month' => ['required', 'regex:/^\d{4}-\d{2}$/'],
             'excel_file' => ['required', 'file', 'mimes:xlsx,xls', 'max:5120'],
+            'replace_report_id' => ['nullable', 'integer'],
         ]);
+
+        $replace = $this->replaceTarget($validated['replace_report_id'] ?? null, $user);
+        if ($replace && $replace->pomecImport->utility_type !== $validated['utility_type']) {
+            return response()->json(['message' => 'Jenis utilitas harus sama dengan laporan yang diunggah ulang.'], 422);
+        }
 
         $preview = $service->parseForPreview(
             $request->file('excel_file'),
             $validated['utility_type'],
-            $validated['period_month']
+            $validated['period_month'],
+            $replace?->pomec_import_id
         );
+        $preview['replace_report_id'] = $replace?->id;
 
         $previewToken = uniqid('pomec_', true);
         session(["pomec_preview_{$previewToken}" => $preview]);
@@ -51,6 +60,7 @@ class PomecController extends Controller
 
         $data = $request->validate([
             'preview_token' => ['required', 'string'],
+            'intent' => ['nullable', Rule::in(['draft', 'submit'])],
         ]);
 
         $sessionKey = "pomec_preview_{$data['preview_token']}";
@@ -60,13 +70,21 @@ class PomecController extends Controller
         }
 
         try {
-            $import = $service->commitPreview($preview, $user);
+            // Status laporan dicek ulang: bisa saja sudah berubah sejak pratinjau.
+            $replace = $this->replaceTarget($preview['replace_report_id'] ?? null, $user);
+            $oldImportId = $replace?->pomec_import_id;
+            $intent = $data['intent'] ?? 'submit';
+            $import = $service->commitPreview($preview, $user, $intent, $replace);
             session()->forget($sessionKey);
+            $report = $import->report()->with(['department', 'template', 'creator', 'reviewer', 'histories.user'])->first();
 
             // Kode batch tetap tercatat di riwayat & audit log; popup cukup bahasa sehari-hari.
             return response()->json([
-                'message' => "{$import->total_rows} data {$this->describe($import)} tersimpan.",
-                'import' => $import->load(['uploader', 'records']),
+                'message' => "{$import->total_rows} data {$this->describe($import)} "
+                    .($intent === 'draft' && ! $replace ? 'disimpan sebagai draft.' : "dikirim ke HOD ({$report->report_code})."),
+                'import' => $import->load(['uploader:id,name', 'records', 'report:id,pomec_import_id,report_code,status']),
+                'report' => $report,
+                'replaced_import_id' => $oldImportId,
             ], 201);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -85,12 +103,30 @@ class PomecController extends Controller
         return response()->json(['message' => $message]);
     }
 
-    /** Contoh: "Listrik Oktober 2026". */
+    /** Laporan POMEC yang dikembalikan HOD dan boleh diunggah ulang oleh pengguna ini. */
+    private function replaceTarget(?int $reportId, User $user): ?DepartmentReport
+    {
+        if (! $reportId) {
+            return null;
+        }
+        $report = DepartmentReport::with('pomecImport')->findOrFail($reportId);
+        abort_unless($report->pomecImport && $user->canInputDepartment($report->department_id), 403);
+        if ($report->status !== DepartmentReport::STATUS_RETURNED) {
+            abort(response()->json(['message' => 'Hanya laporan yang dikembalikan HOD yang bisa diunggah ulang.'], 422));
+        }
+
+        return $report;
+    }
+
+    /** Contoh: "Listrik 26 November 2026" atau "Listrik 1–25 Oktober 2026" (unggahan harian). */
     private function describe(PomecImport $import): string
     {
-        $month = Carbon::parse("{$import->period_month}-01")->locale('id')->translatedFormat('F Y');
+        $first = $import->records()->min('reading_date');
+        $last = $import->records()->max('reading_date');
+        $month = Carbon::parse($last ?? "{$import->period_month}-01")->locale('id')->translatedFormat('F Y');
+        $days = $first ? Carbon::parse($first)->day.($first === $last ? '' : '–'.Carbon::parse($last)->day).' ' : '';
 
-        return PomecRecord::TYPES[$import->utility_type]['id'].' '.$month;
+        return PomecRecord::TYPES[$import->utility_type]['id'].' '.$days.$month;
     }
 
     public function exportExcel(Request $request, string $utilityType, PomecExcelService $service): StreamedResponse

@@ -12,6 +12,7 @@ use App\Models\ReportTemplate;
 use App\Models\User;
 use App\Services\DepartmentReportExportService;
 use App\Services\DepartmentReportService;
+use App\Services\PomecExcelService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -54,17 +55,7 @@ class DepartmentReportController extends Controller
 
         $report = DB::transaction(function () use ($validated, $template, $rows, $attachmentPath, $attachmentName, $user): DepartmentReport {
             $deptCode = $template->department->code;
-            $ym = date('Ym', strtotime($validated['period_date']));
-            $latestCode = DepartmentReport::where('report_code', 'like', "RPT-{$deptCode}-{$ym}-%")
-                ->lockForUpdate()
-                ->orderByDesc('id')
-                ->value('report_code');
-            $lastSeq = $latestCode && preg_match('/(\d+)$/', $latestCode, $m) ? (int) $m[1] : 0;
-            $seq = max($lastSeq, DepartmentReport::where('department_id', $template->department_id)->count()) + 1;
-            do {
-                $code = sprintf('RPT-%s-%s-%03d', $deptCode, $ym, $seq);
-                $seq++;
-            } while (DepartmentReport::where('report_code', $code)->exists());
+            $code = DepartmentReport::nextCode($deptCode, $template->department_id, $validated['period_date']);
 
             $status = $validated['intent'] === 'submit'
                 ? DepartmentReport::STATUS_SUBMITTED
@@ -119,6 +110,12 @@ class DepartmentReportController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
+        if ($report->pomec_import_id) {
+            return response()->json(['message' => session('locale', 'id') === 'en'
+                ? 'This report comes from the POMEC Excel file. Use Re-upload instead.'
+                : 'Isi laporan ini berasal dari file Excel POMEC. Gunakan Unggah Ulang.'], 422);
+        }
+
         $report->loadMissing('template');
         $rows = $reportService->validateAndSanitizeRows($report->template, json_decode($validated['rows_data'], true));
 
@@ -172,6 +169,33 @@ class DepartmentReportController extends Controller
         ]);
     }
 
+    /** Draft → Submitted tanpa mengubah isi (dipakai laporan POMEC). */
+    public function submit(Request $request, DepartmentReport $report): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        abort_unless($report->status === DepartmentReport::STATUS_DRAFT && $report->isEditableBy($user), 403);
+
+        DB::transaction(function () use ($report, $user): void {
+            $report->update(['status' => DepartmentReport::STATUS_SUBMITTED, 'submitted_at' => now()]);
+            ReportHistory::create([
+                'department_report_id' => $report->id,
+                'user_id' => $user->id,
+                'from_status' => DepartmentReport::STATUS_DRAFT,
+                'to_status' => DepartmentReport::STATUS_SUBMITTED,
+                'action' => 'submitted',
+                'note' => 'Laporan dikirim untuk review HOD.',
+                'created_at' => now(),
+            ]);
+            AuditLog::record($user, 'report.submitted', 'Reports', "Laporan {$report->report_code} dikirim ke HOD.");
+        });
+
+        return response()->json([
+            'message' => session('locale', 'id') === 'en' ? 'Report submitted to HOD.' : 'Laporan berhasil dikirim ke HOD.',
+            'report' => $report->fresh(['department', 'template', 'creator', 'reviewer', 'histories.user']),
+        ]);
+    }
+
     public function review(ReviewDepartmentReportRequest $request, DepartmentReport $report): JsonResponse
     {
         /** @var User $user */
@@ -201,7 +225,7 @@ class DepartmentReportController extends Controller
                 'from_status' => $fromStatus,
                 'to_status' => $toStatus,
                 'action' => $toStatus,
-                'note' => $validated['review_note'] ?: $defaultNote,
+                'note' => ($validated['review_note'] ?? null) ?: $defaultNote,
                 'created_at' => now(),
             ]);
 
@@ -227,11 +251,21 @@ class DepartmentReportController extends Controller
         ]);
     }
 
-    public function destroy(Request $request, DepartmentReport $report): JsonResponse
+    public function destroy(Request $request, DepartmentReport $report, PomecExcelService $pomec): JsonResponse
     {
         $this->authorize('delete', $report);
 
         $code = $report->report_code;
+        // Draft POMEC: unggahannya ikut dihapus (file diarsipkan, laporan terhapus bersama batch).
+        if ($report->pomecImport) {
+            $pomec->deleteImport($report->pomecImport, $request->user());
+
+            return response()->json([
+                'message' => session('locale', 'id') === 'en' ? "Draft {$code} deleted." : "Draft {$code} berhasil dihapus.",
+                'pomec_import_id' => $report->pomec_import_id,
+            ]);
+        }
+
         if ($report->attachment_path && Storage::disk('local')->exists($report->attachment_path)) {
             Storage::disk('local')->delete($report->attachment_path);
         }

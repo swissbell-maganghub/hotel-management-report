@@ -22,6 +22,7 @@ class DepartmentReport extends Model
         'report_code',
         'department_id',
         'report_template_id',
+        'pomec_import_id',
         'title',
         'period_type',
         'period_date',
@@ -45,6 +46,30 @@ class DepartmentReport extends Model
             'submitted_at' => 'datetime',
             'reviewed_at' => 'datetime',
         ];
+    }
+
+    /** Kode berikutnya, mis. RPT-ENG-202611-004. Panggil di dalam transaksi. */
+    public static function nextCode(string $deptCode, int $departmentId, string $date): string
+    {
+        $ym = date('Ym', strtotime($date));
+        $latestCode = self::where('report_code', 'like', "RPT-{$deptCode}-{$ym}-%")
+            ->lockForUpdate()
+            ->orderByDesc('id')
+            ->value('report_code');
+        $lastSeq = $latestCode && preg_match('/(\d+)$/', $latestCode, $m) ? (int) $m[1] : 0;
+        $seq = max($lastSeq, self::where('department_id', $departmentId)->count()) + 1;
+        do {
+            $code = sprintf('RPT-%s-%s-%03d', $deptCode, $ym, $seq);
+            $seq++;
+        } while (self::where('report_code', $code)->exists());
+
+        return $code;
+    }
+
+    /** Isi laporan ini berasal dari file Excel POMEC, bukan dari form. */
+    public function pomecImport(): BelongsTo
+    {
+        return $this->belongsTo(PomecImport::class);
     }
 
     public function department(): BelongsTo
@@ -75,6 +100,11 @@ class DepartmentReport extends Model
     public function isEditableBy(User $user): bool
     {
         if (! in_array($this->status, [self::STATUS_DRAFT, self::STATUS_RETURNED], true)) {
+            return false;
+        }
+
+        // Form manual dimatikan: laporan lama hanya bisa dilihat dan diperiksa. Laporan POMEC tetap berjalan.
+        if (! $this->pomec_import_id && ! config('hotel.manual_reports')) {
             return false;
         }
 

@@ -3,11 +3,16 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Models\Department;
+use App\Models\DepartmentReport;
 use App\Models\PomecImport;
 use App\Models\PomecRecord;
+use App\Models\ReportHistory;
+use App\Models\ReportTemplate;
 use App\Models\User;
 use App\Support\ExcelCell;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Exception;
@@ -30,7 +35,16 @@ class PomecExcelService
         'aug' => 8, 'agu' => 8, 'sep' => 9, 'oct' => 10, 'okt' => 10, 'nov' => 11, 'dec' => 12, 'des' => 12,
     ];
 
-    public function parseForPreview(UploadedFile $file, string $utilityType, string $periodMonth): array
+    /** Kolom laporan per utilitas: modal detail dan ekspor laporan memakai kolom ini. */
+    private const REPORT_COLUMNS = [
+        'electricity' => ['date', 'meter', 'lwbp', 'wbp', 'usage', 'cost'],
+        'water' => ['date', 'meter', 'usage', 'cost'],
+        'gas' => ['date', 'usage', 'notes'],
+        'solar' => ['date', 'usage', 'notes'],
+    ];
+
+    /** $replaceImportId: unggah ulang laporan yang dikembalikan; baris batch itu dianggap belum tersimpan. */
+    public function parseForPreview(UploadedFile $file, string $utilityType, string $periodMonth, ?int $replaceImportId = null): array
     {
         $realPath = $file->getRealPath();
         $fileHash = hash_file('sha256', $realPath);
@@ -57,45 +71,60 @@ class PomecExcelService
         }
 
         $hasCost = PomecRecord::TYPES[$utilityType]['cost'];
+        $today = now()->toDateString();
+        // File bulanan diunggah ulang setiap hari: semua yang sudah tersimpan bulan ini diambil sekali.
+        $monthStart = "{$periodMonth}-01";
+        $saved = PomecRecord::with('import:id,batch_code')
+            ->where('utility_type', $utilityType)
+            ->when($replaceImportId, fn ($q) => $q->where('pomec_import_id', '!=', $replaceImportId))
+            ->whereDate('reading_date', '>=', $monthStart)
+            ->whereDate('reading_date', '<=', date('Y-m-t', strtotime($monthStart)))
+            ->get()
+            ->keyBy(fn (PomecRecord $r) => $r->reading_date->format('Y-m-d').'|'.$r->meter_name);
         $rows = [];
         $seen = [];
-        $validCount = 0;
-        $duplicateRowCount = 0;
+        $counts = ['valid' => 0, 'existing' => 0, 'changed' => 0, 'error' => 0];
         $totalUsage = 0.0;
         $totalCost = 0.0;
 
         foreach ($rawRows as $row) {
             $rowErrors = [];
-            if ($row['usage'] === null) {
-                $rowErrors[] = 'Pemakaian bukan angka (cek rumus di Excel)';
-            } elseif (min($row['usage'], $row['lwbp'] ?? 0, $row['wbp'] ?? 0) < 0) {
-                $rowErrors[] = 'Pemakaian negatif (cek angka meter atau pengisian stok)';
-            }
-            if ($hasCost && $row['cost'] === null) {
-                $rowErrors[] = 'Biaya bukan angka (cek rumus di Excel)';
-            }
-
-            // Identitas baris tanpa angka pemakaian: file revisi tidak boleh terhitung dua kali.
             $txHash = hash('sha256', "{$utilityType}|{$row['date']}|{$row['meter']}");
-            $isDuplicateRow = PomecRecord::where('utility_type', $utilityType)
-                ->whereDate('reading_date', $row['date'])
-                ->where('meter_name', $row['meter'])
-                ->exists();
-            if ($isDuplicateRow) {
-                $duplicateRowCount++;
-                $rowErrors[] = 'Transaksi duplikat sudah ada di database';
-            }
-            if (isset($seen[$txHash])) {
-                $rowErrors[] = 'Tanggal ganda di dalam file';
+            $existing = $saved["{$row['date']}|{$row['meter']}"] ?? null;
+
+            if ($existing) {
+                // Tanggal lama dilewati. Kalau angkanya berubah, hanya diberi peringatan: data tersimpan tidak ditimpa.
+                $same = $row['usage'] !== null && abs((float) $existing->total_usage - $row['usage']) < 0.01
+                    && (! $hasCost || ($row['cost'] !== null && abs((float) $existing->cost - $row['cost']) < 0.01));
+                $status = $same ? 'existing' : 'changed';
+                if (! $same) {
+                    $rowErrors[] = 'Berbeda dengan yang tersimpan ('.$this->qty($existing->total_usage).' di batch '.$existing->import?->batch_code
+                        .'); tidak ditimpa. Untuk koreksi, minta HOD mengembalikan (Return) laporannya lalu unggah ulang dari laporan itu';
+                }
+            } else {
+                if ($row['usage'] === null) {
+                    $rowErrors[] = 'Pemakaian bukan angka (cek rumus di Excel)';
+                } elseif (min($row['usage'], $row['lwbp'] ?? 0, $row['wbp'] ?? 0) < 0) {
+                    $rowErrors[] = 'Pemakaian negatif (cek angka meter atau pengisian stok)';
+                }
+                if ($hasCost && $row['cost'] === null) {
+                    $rowErrors[] = 'Biaya bukan angka (cek rumus di Excel)';
+                }
+                if ($row['date'] > $today) {
+                    $rowErrors[] = 'Tanggal belum terjadi (cek tanggal di Excel)';
+                }
+                if (isset($seen[$txHash])) {
+                    $rowErrors[] = 'Tanggal ganda di dalam file';
+                }
+                $status = $rowErrors ? 'error' : 'valid';
             }
             $seen[$txHash] = true;
+            $counts[$status]++;
 
-            $status = empty($rowErrors) ? 'valid' : ($isDuplicateRow && count($rowErrors) === 1 ? 'duplicate' : 'error');
             if ($status === 'valid') {
-                $validCount++;
                 $totalUsage += $row['usage'];
                 $totalCost += $row['cost'] ?? 0;
-            } else {
+            } elseif ($rowErrors) {
                 $errors[] = "{$row['meter']} {$row['date']}: ".implode(', ', $rowErrors);
             }
 
@@ -114,6 +143,18 @@ class PomecExcelService
             ];
         }
 
+        // Tanggal yang terlewat: belum tersimpan dan tidak terbaca di file, padahal tanggal sesudahnya ada.
+        $covered = array_flip([
+            ...array_column($rawRows, 'date'),
+            ...$saved->map(fn (PomecRecord $r) => $r->reading_date->format('Y-m-d'))->all(),
+        ]);
+        $missingDates = [];
+        for ($d = $monthStart, $last = $covered ? max(array_keys($covered)) : $monthStart; $d < $last; $d = date('Y-m-d', strtotime("{$d} +1 day"))) {
+            if (! isset($covered[$d])) {
+                $missingDates[] = $d;
+            }
+        }
+
         // Store temp file in private storage so user can confirm commit without re-uploading
         $tempPath = 'pomec/tmp/'.uniqid('preview_', true).'.'.$file->getClientOriginalExtension();
         Storage::disk('local')->put($tempPath, file_get_contents($realPath));
@@ -127,9 +168,13 @@ class PomecExcelService
             'is_duplicate_file' => (bool) $duplicateImport,
             'duplicate_batch' => $duplicateImport?->batch_code,
             'rows' => $rows,
-            'valid_count' => $validCount,
-            'error_count' => $rows ? count($rows) - $validCount : count($errors),
-            'duplicate_row_count' => $duplicateRowCount,
+            'valid_count' => $counts['valid'],
+            'error_count' => $rows ? $counts['error'] : count($errors),
+            'existing_count' => $counts['existing'],
+            'changed_count' => $counts['changed'],
+            'duplicate_row_count' => $counts['existing'] + $counts['changed'],
+            'missing_dates' => $missingDates,
+            'last_saved_date' => $saved->isEmpty() ? null : $saved->max(fn (PomecRecord $r) => $r->reading_date->format('Y-m-d')),
             'total_usage' => round($totalUsage, 2),
             'total_cost' => $hasCost ? round($totalCost, 2) : null,
             'errors' => $errors,
@@ -266,6 +311,11 @@ class PomecExcelService
         return $rows;
     }
 
+    private function qty(mixed $value): string
+    {
+        return rtrim(rtrim(number_format((float) $value, 2, ',', '.'), '0'), ',');
+    }
+
     private function sheet(Spreadsheet $workbook, string $name): Worksheet
     {
         return $workbook->getSheetByName($name)
@@ -325,7 +375,11 @@ class PomecExcelService
         return ! $this->isEmpty($this->value($sheet, "C{$row}")) || ! $this->isEmpty($this->value($sheet, "D{$row}"));
     }
 
-    public function commitPreview(array $preview, User $user): PomecImport
+    /**
+     * Simpan batch dan laporannya. $intent: 'draft' atau 'submit'.
+     * $replace: laporan yang dikembalikan HOD; isinya diganti file ini lalu dikirim ulang.
+     */
+    public function commitPreview(array $preview, User $user, string $intent = 'submit', ?DepartmentReport $replace = null): PomecImport
     {
         if ($preview['is_duplicate_file']) {
             throw new \RuntimeException('File dengan hash SHA-256 ini sudah pernah diimpor sebelumnya.');
@@ -336,7 +390,9 @@ class PomecExcelService
             throw new \RuntimeException('Tidak ada baris valid yang dapat disimpan.');
         }
 
-        return DB::transaction(function () use ($preview, $validRows, $user): PomecImport {
+        $oldImport = $replace?->pomecImport;
+
+        $import = DB::transaction(function () use ($preview, $validRows, $user, $intent, $replace, $oldImport): PomecImport {
             $prefix = PomecRecord::TYPES[$preview['utility_type']]['prefix'];
             $monthCompact = str_replace('-', '', $preview['period_month']);
             $latestBatch = PomecImport::where('batch_code', 'like', "POMEC-{$prefix}-{$monthCompact}-%")
@@ -374,6 +430,12 @@ class PomecExcelService
                 'committed_at' => now(),
             ]);
 
+            if ($replace) {
+                // Laporan dipindah ke batch baru dulu supaya tidak ikut terhapus bersama batch lama.
+                $replace->update(['pomec_import_id' => $import->id]);
+                $oldImport?->records()->delete();
+            }
+
             foreach ($validRows as $row) {
                 PomecRecord::create([
                     'pomec_import_id' => $import->id,
@@ -398,8 +460,133 @@ class PomecExcelService
                 ['batch_code' => $batchCode, 'sha256' => $preview['file_hash']]
             );
 
+            if ($replace) {
+                $this->fillReport($replace, $import);
+                $replace->fill([
+                    'status' => DepartmentReport::STATUS_SUBMITTED,
+                    'submitted_at' => now(),
+                ])->save();
+                ReportHistory::create([
+                    'department_report_id' => $replace->id,
+                    'user_id' => $user->id,
+                    'from_status' => DepartmentReport::STATUS_RETURNED,
+                    'to_status' => DepartmentReport::STATUS_SUBMITTED,
+                    'action' => 'submitted',
+                    'note' => "File perbaikan {$import->original_filename} diunggah ulang dan dikirim ke HOD.",
+                    'created_at' => now(),
+                ]);
+                AuditLog::record($user, 'report.submitted', 'Reports', "Laporan {$replace->report_code} diunggah ulang dari {$batchCode}.");
+            } else {
+                $this->createReport($import, $user, $intent === 'draft' ? DepartmentReport::STATUS_DRAFT : DepartmentReport::STATUS_SUBMITTED);
+            }
+
             return $import;
         });
+
+        if ($oldImport) {
+            $this->deleteImport($oldImport->fresh(), $user);
+        }
+
+        return $import;
+    }
+
+    /** Template laporan Engineering per utilitas (tidak muncul di form laporan manual). */
+    public function reportTemplate(string $type): ReportTemplate
+    {
+        $info = PomecRecord::TYPES[$type];
+        $unit = $info['unit'];
+        $columns = [
+            'date' => ['key' => 'reading_date', 'label' => 'Tanggal', 'label_en' => 'Date', 'type' => 'date'],
+            'meter' => ['key' => 'meter_name', 'label' => 'Meter', 'label_en' => 'Meter', 'type' => 'text'],
+            'lwbp' => ['key' => 'lwbp_value', 'label' => 'LWBP (kWh)', 'label_en' => 'LWBP (kWh)', 'type' => 'number', 'sum' => true],
+            'wbp' => ['key' => 'wbp_value', 'label' => 'WBP (kWh)', 'label_en' => 'WBP (kWh)', 'type' => 'number', 'sum' => true],
+            'usage' => ['key' => 'total_usage', 'label' => "Pemakaian ({$unit})", 'label_en' => "Usage ({$unit})", 'type' => 'number', 'sum' => true],
+            'cost' => ['key' => 'cost', 'label' => 'Biaya sebelum pajak (Rp)', 'label_en' => 'Cost before tax (IDR)', 'type' => 'currency', 'sum' => true],
+            'notes' => ['key' => 'notes', 'label' => 'Catatan', 'label_en' => 'Notes', 'type' => 'text'],
+        ];
+
+        return ReportTemplate::updateOrCreate(['code' => 'ENG-POMEC-'.$info['prefix']], [
+            'department_id' => Department::where('code', 'ENG')->value('id'),
+            'name' => "POMEC {$info['id']}",
+            'name_en' => "POMEC {$info['en']}",
+            'description' => "Pemakaian {$info['id']} harian dari file Excel engineering.",
+            'description_en' => "Daily {$info['en']} usage from the engineering Excel file.",
+            'columns_schema' => array_map(fn (string $c) => $columns[$c], self::REPORT_COLUMNS[$type]),
+            'default_rows' => [],
+            'is_active' => false,
+        ]);
+    }
+
+    /** Laporan untuk unggahan yang belum punya (data lama / seeder). Status: Submitted. */
+    public function syncReports(): int
+    {
+        $imports = PomecImport::doesntHave('report')->with('uploader')->orderBy('id')->get();
+        foreach ($imports as $import) {
+            DB::transaction(fn () => $this->createReport($import, $import->uploader, DepartmentReport::STATUS_SUBMITTED, 'Laporan dibuat dari unggahan POMEC yang sudah ada.'));
+        }
+
+        return $imports->count();
+    }
+
+    private function createReport(PomecImport $import, User $user, string $status, ?string $note = null): DepartmentReport
+    {
+        $engId = Department::where('code', 'ENG')->value('id');
+        $last = $import->records()->max('reading_date') ?? "{$import->period_month}-01";
+        $report = new DepartmentReport([
+            'report_code' => DepartmentReport::nextCode('ENG', $engId, (string) $last),
+            'department_id' => $engId,
+            'pomec_import_id' => $import->id,
+            'status' => $status,
+            'created_by' => $user->id,
+            'submitted_at' => $status === DepartmentReport::STATUS_SUBMITTED ? now() : null,
+        ]);
+        $this->fillReport($report, $import);
+        $report->save();
+
+        $submitted = $status === DepartmentReport::STATUS_SUBMITTED;
+        ReportHistory::create([
+            'department_report_id' => $report->id,
+            'user_id' => $user->id,
+            'from_status' => null,
+            'to_status' => $status,
+            'action' => $submitted ? 'submitted' : 'created',
+            'note' => $note ?? "Data POMEC dari {$import->original_filename} ".($submitted ? 'dikirim ke HOD.' : 'disimpan sebagai draft.'),
+            'created_at' => now(),
+        ]);
+        AuditLog::record($user, 'report.'.$status, 'Reports', "Laporan {$report->report_code} (POMEC {$import->batch_code}) disimpan dengan status {$status}.");
+
+        return $report;
+    }
+
+    /** Isi laporan dari baris batch: judul, periode, tabel, dan ringkasan total. */
+    private function fillReport(DepartmentReport $report, PomecImport $import): void
+    {
+        $type = PomecRecord::TYPES[$import->utility_type];
+        $records = $import->records()->get();
+        $first = $records->first()?->reading_date ?? Carbon::parse("{$import->period_month}-01");
+        $last = $records->last()?->reading_date ?? $first;
+        $label = fn (Carbon $d, string $format) => $d->copy()->locale('id')->translatedFormat($format);
+        $range = $first->isSameDay($last) ? $label($last, 'j M Y') : $first->day.'–'.$label($last, 'j M Y');
+        $days = $records->pluck('reading_date')->map->toDateString()->unique()->count();
+        $usage = (float) $records->sum('total_usage');
+        $cost = $records->whereNotNull('cost')->sum('cost');
+        $template = $this->reportTemplate($import->utility_type);
+        $keys = array_column($template->columns_schema, 'key');
+
+        $report->fill([
+            'report_template_id' => $template->id,
+            'title' => "POMEC {$type['id']} — {$range}",
+            'period_type' => $days > 1 ? 'monthly' : 'daily',
+            'period_date' => $last->toDateString(),
+            'rows_data' => $records->map(fn (PomecRecord $r) => collect($keys)->mapWithKeys(fn (string $key) => [$key => match (true) {
+                $key === 'reading_date' => $r->reading_date->toDateString(),
+                $r->{$key} === null, in_array($key, ['meter_name', 'notes'], true) => $r->{$key},
+                default => (float) $r->{$key},
+            }])->all())->values()->all(),
+            'summary_notes' => 'Total '.$this->qty($usage)." {$type['unit']}"
+                .($type['cost'] ? ' · Rp '.number_format((float) $cost, 0, ',', '.').' (sebelum pajak)' : '')
+                ." · {$days} hari · batch {$import->batch_code}.",
+        ]);
     }
 
     /** Menghapus batch beserta barisnya. File asli diarsipkan, tidak dibuang. */
@@ -425,6 +612,7 @@ class PomecExcelService
             );
 
             $import->records()->delete();
+            $import->report()->delete();
             $import->delete();
         });
 

@@ -31,8 +31,8 @@
                     </td>
                 @endif
                 <td style="vertical-align: middle;">
-                    <div class="brand">Swiss-Belhotel Waterfront Makassar • POMEC Utility Management</div>
-                    <h1>Laporan Utilitas POMEC — {{ $type['id'] }} ({{ $utilityType === 'electricity' ? 'LWBP & WBP, kWh' : $type['unit'] }})</h1>
+                    <div class="brand">Swiss-Belhotel Waterfront Makassar • POMEC Control</div>
+                    <h1>Laporan POMEC Control — {{ $type['id'] }} ({{ $utilityType === 'electricity' ? 'LWBP & WBP, kWh' : $type['unit'] }})</h1>
                     <div style="font-size: 10px; color: #475569;">Dicetak oleh: {{ $generatedBy->name }} • {{ now()->timezone('Asia/Makassar')->format('d M Y H:i:s') }} WITA</div>
                 </td>
             </tr>

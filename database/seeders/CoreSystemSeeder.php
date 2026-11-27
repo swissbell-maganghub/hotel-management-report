@@ -93,6 +93,8 @@ class CoreSystemSeeder extends Seeder
                 'default_rows' => [
                     ['equipment' => 'Chiller Plant #1', 'location' => 'Rooftop Lt. 12', 'condition' => 'Normal', 'downtime_min' => 0, 'action_taken' => ''],
                 ],
+                // Engineering melapor lewat unggahan POMEC; form manual ini tidak dipakai.
+                'is_active' => false,
             ],
             'FIN-RECON' => [
                 'department_id' => $departments['FIN']->id,

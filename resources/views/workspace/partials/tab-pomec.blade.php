@@ -5,21 +5,45 @@
     $pomecTypes = \App\Models\PomecRecord::TYPES;
     $field = 'w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal/25 focus:border-teal';
     $pomecCard = 'bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(15,23,42,0.04)]';
+    $engName = $departments->firstWhere('code', 'ENG')?->localizedName($locale) ?? 'Engineering';
 @endphp
 
 {{-- Isi kartu, grafik, dan tabel dirender oleh workspace.js dari data bulan yang dipilih. --}}
 <div id="pomec-root" class="space-y-5" data-types='@json($pomecTypes)' data-can-delete="{{ $canDeletePomec ? '1' : '0' }}">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="sr-only">{{ $isEn ? 'Utility Usage' : 'Pemakaian Utilitas' }}</h2>
-        <div role="group" aria-label="{{ $isEn ? 'Utility' : 'Jenis utilitas' }}" class="flex gap-1 max-w-full overflow-x-auto p-1 rounded-xl bg-slate-100">
-            @foreach (['all' => $isEn ? 'Overview' : 'Ringkasan'] + array_map(fn ($type) => $type[$isEn ? 'en' : 'id'], $pomecTypes) as $key => $label)
-                <button type="button" data-pomec-open="{{ $key }}" aria-pressed="false" class="pomec-tab px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap text-slate-500 hover:text-navy aria-pressed:bg-teal aria-pressed:!text-white transition cursor-pointer">{{ $label }}</button>
-            @endforeach
+    {{-- POMEC adalah halaman laporan Engineering: judul modul, departemen, dan status pembaruan harian. --}}
+    <div class="{{ $pomecCard }} p-4 sm:p-5 space-y-3">
+        <div class="space-y-1 min-w-0">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-teal">{{ $engName }} &middot; {{ $isEn ? 'Utility Report' : 'Laporan Utilitas' }}</p>
+            <h2 class="text-lg font-heading font-extrabold text-navy">POMEC Control</h2>
+            <p class="text-xs text-slate-500 max-w-3xl">{{ $isEn
+                ? 'Electricity, water, LPG, and genset diesel consumption and cost, compiled from the Engineering daily records and verified by the Head of Department.'
+                : 'Konsumsi dan biaya listrik, air, gas LPG, serta solar genset, disusun dari pencatatan harian Engineering dan diverifikasi oleh Head of Department.' }}</p>
         </div>
-        <div class="flex items-center gap-2 ml-auto">
-            <select id="pomec-month-filter" aria-label="{{ $isEn ? 'Month' : 'Bulan' }}" class="{{ $field }} !w-auto font-semibold text-navy"></select>
+        <div id="pomec-freshness" class="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-3 border-t border-slate-100 text-[11px] text-slate-500"></div>
+    </div>
+
+    {{-- Navigasi di kiri; filter, lalu aksi utama di kanan. Kalau sempit, turun baris dan aksi tetap di kanan. --}}
+    <div class="@container">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+            <div role="group" aria-label="{{ $isEn ? 'Utility' : 'Jenis utilitas' }}" class="flex gap-1 max-w-full overflow-x-auto p-1 rounded-xl bg-slate-100">
+                @foreach (['all' => $isEn ? 'Overview' : 'Ringkasan'] + array_map(fn ($type) => $type[$isEn ? 'en' : 'id'], $pomecTypes) as $key => $label)
+                    <button type="button" data-pomec-open="{{ $key }}" aria-pressed="false" class="pomec-tab px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap text-slate-500 hover:text-navy aria-pressed:bg-teal aria-pressed:!text-white transition cursor-pointer">{{ $label }}</button>
+                @endforeach
+            </div>
+            {{-- Ganti baris di layar sempit: tab di atas, filter dan aksi bersama di bawah. --}}
+            <span aria-hidden="true" class="basis-full @min-[64rem]:hidden"></span>
+            <select id="pomec-month-filter" aria-label="{{ $isEn ? 'Month' : 'Bulan' }}" class="{{ $field }} !w-auto font-semibold text-navy @min-[64rem]:ml-auto"></select>
+            <div class="flex items-center gap-2 text-xs font-semibold text-slate-500 @max-[36rem]:order-last">
+                <span id="pomec-view-label">{{ $isEn ? 'Chart by' : 'Grafik per' }}</span>
+                <div role="group" aria-labelledby="pomec-view-label" class="flex gap-1 p-1 rounded-xl bg-slate-100">
+                    @foreach (['day' => $isEn ? 'Day' : 'Hari', 'week' => $isEn ? 'Week' : 'Minggu', 'month' => $isEn ? 'Month' : 'Bulan'] as $key => $label)
+                        <button type="button" data-pomec-view="{{ $key }}" aria-pressed="false" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-navy aria-pressed:bg-white aria-pressed:!text-navy aria-pressed:shadow-sm dark:aria-pressed:bg-[#2C374B] dark:aria-pressed:!text-white transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">{{ $label }}</button>
+                    @endforeach
+                </div>
+            </div>
             @if ($canImportPomec)
-                <button type="button" id="pomec-upload-toggle" aria-haspopup="dialog" class="px-4 py-2 rounded-xl bg-navy hover:bg-navy-light text-white text-xs font-semibold whitespace-nowrap transition cursor-pointer">
+                <span aria-hidden="true" class="hidden @min-[64rem]:block w-px h-6 bg-slate-200 dark:bg-white/10"></span>
+                <button type="button" id="pomec-upload-toggle" aria-haspopup="dialog" class="ml-auto @min-[64rem]:ml-0 px-4 py-2 rounded-xl bg-navy hover:bg-navy-light text-white text-xs font-semibold whitespace-nowrap transition cursor-pointer">
                     {{ $isEn ? 'Upload File' : 'Unggah File' }}
                 </button>
             @endif
@@ -31,8 +55,8 @@
         <dialog id="pomec-upload-panel" aria-labelledby="pomec-upload-title" class="m-auto w-[calc(100%-2rem)] max-w-xl max-h-[90vh] p-0 rounded-2xl bg-white text-slate-900 border border-slate-200 shadow-2xl backdrop:bg-slate-900/50 open:flex flex-col overflow-hidden">
             <div class="flex items-start justify-between gap-3 px-6 py-4 border-b border-slate-100">
                 <div>
-                    <h3 id="pomec-upload-title" class="text-base font-heading font-bold text-navy">{{ $isEn ? 'Upload Monthly Report' : 'Unggah Laporan Bulanan' }}</h3>
-                    <p class="text-xs text-slate-500">{{ $isEn ? 'Use the original Excel file, without renaming sheets or moving columns.' : 'Pakai file Excel asli, tanpa mengubah nama sheet atau susunan kolom.' }}</p>
+                    <h3 id="pomec-upload-title" class="text-base font-heading font-bold text-navy">{{ $isEn ? 'Upload Daily Data' : 'Unggah Data Harian' }}</h3>
+                    <p id="pomec-upload-subtitle" class="text-xs text-slate-500">{{ $isEn ? 'Upload the same monthly Excel file every day. Dates already saved are skipped; only new dates are saved.' : 'Unggah file Excel bulanan yang sama setiap hari. Tanggal yang sudah tersimpan dilewati; hanya tanggal baru yang disimpan.' }}</p>
                 </div>
                 <button type="button" data-pomec-close aria-label="{{ $isEn ? 'Close' : 'Tutup' }}" class="p-1.5 rounded-lg text-slate-400 hover:text-navy hover:bg-slate-100 transition cursor-pointer">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -50,8 +74,8 @@
                         </select>
                     </label>
                     <label class="block text-xs font-semibold text-slate-700 space-y-1.5">
-                        <span>{{ $isEn ? 'Report month' : 'Bulan laporan' }}</span>
-                        <input type="month" name="period_month" id="pomec-period-month" value="{{ date('Y-m') }}" required class="{{ $field }} font-normal">
+                        <span>{{ $isEn ? 'Month in the file' : 'Bulan di file' }}</span>
+                        <input type="month" name="period_month" id="pomec-period-month" value="{{ now()->subDay()->format('Y-m') }}" required class="{{ $field }} font-normal">
                     </label>
                     {{-- Input asli menutupi kotak (transparan), jadi klik, seret-lepas, dan keyboard tetap jalan. --}}
                     <div class="sm:col-span-2 relative flex items-center gap-3 rounded-xl border border-dashed border-slate-300 hover:border-teal focus-within:border-teal focus-within:ring-2 focus-within:ring-teal/25 px-4 py-4 transition">
@@ -89,6 +113,7 @@
                 <div class="flex items-center gap-2 ml-auto">
                     <button type="button" data-pomec-close class="py-2 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-navy text-xs font-semibold transition cursor-pointer">{{ $isEn ? 'Cancel' : 'Batal' }}</button>
                     <button type="submit" form="pomec-preview-form" id="pomec-preview-btn" data-busy="{{ $isEn ? 'Checking…' : 'Memeriksa…' }}" class="py-2 px-4 rounded-xl bg-teal hover:bg-teal-light text-white text-xs font-semibold transition cursor-pointer disabled:opacity-50">{{ $isEn ? 'Check File' : 'Periksa File' }}</button>
+                    <button type="button" id="pomec-draft-btn" class="hidden py-2 px-4 rounded-xl border border-navy/30 bg-white text-navy hover:bg-navy/5 text-xs font-semibold transition cursor-pointer disabled:opacity-50">{{ $isEn ? 'Save as Draft' : 'Simpan Draft' }}</button>
                     <button type="button" id="pomec-commit-btn" class="hidden py-2 px-4 rounded-xl bg-navy hover:bg-navy-light text-white text-xs font-semibold transition cursor-pointer disabled:opacity-50"></button>
                 </div>
             </div>
@@ -106,9 +131,8 @@
             <div class="relative h-56 w-full">
                 <canvas id="pomec-chart-cost" role="img" aria-label="{{ $isEn ? 'Daily cost per utility' : 'Biaya harian per utilitas' }}"></canvas>
             </div>
+            <p id="pomec-chart-hint" class="text-[11px] text-slate-500"></p>
         </div>
-
-        <p class="text-[11px] text-slate-500">{{ $isEn ? 'Dashed line: daily average. When some days stand out (25% or more above it), the other days are faded.' : 'Garis putus-putus: rata-rata harian. Kalau ada hari yang menonjol (25% atau lebih di atas rata-rata), hari lainnya dipudarkan.' }}</p>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             @foreach ($pomecTypes as $key => $type)
@@ -158,41 +182,37 @@
 
         <div class="overflow-x-auto">
             <table id="pomec-records-table" class="w-full min-w-[640px] text-left border-collapse text-xs">
-                <thead class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    <tr>
-                        <th class="py-3 px-5 cursor-pointer select-none hover:text-navy transition" data-sort-key="reading_date">{{ $isEn ? 'Date' : 'Tanggal' }}</th>
-                        <th class="py-3 px-5 cursor-pointer select-none hover:text-navy transition" data-sort-key="meter_name">Meter</th>
-                        <th class="py-3 px-5 text-right cursor-pointer select-none hover:text-navy transition" data-sort-key="total_usage">{{ $isEn ? 'Usage' : 'Pemakaian' }}</th>
-                        <th class="pomec-cost-col py-3 px-5 text-right cursor-pointer select-none hover:text-navy transition" data-sort-key="cost">{{ $isEn ? 'Cost' : 'Biaya' }}</th>
-                        <th class="py-3 px-5">{{ $isEn ? 'Notes' : 'Catatan' }}</th>
-                    </tr>
-                </thead>
+                {{-- Kepala dan isi tabel dirender TanStack Table (workspace.js). --}}
+                <thead class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500"></thead>
                 <tbody id="pomec-records-tbody" class="divide-y divide-slate-100"></tbody>
             </table>
         </div>
         <div id="pomec-pagination"></div>
     </div>
 
-    <details class="{{ $pomecCard }} overflow-hidden">
-        <summary class="px-5 py-4 cursor-pointer text-sm font-heading font-bold text-navy">
-            {{ $isEn ? 'Upload History' : 'Riwayat Unggahan' }}
-            <span id="pomec-batch-count" class="ml-1 font-mono-num text-slate-500">{{ $pomecImports->count() }}</span>
-        </summary>
-        <div class="overflow-x-auto border-t border-slate-100">
-            <table class="w-full min-w-[640px] text-left border-collapse text-xs">
-                <thead class="bg-slate-50/70 border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    <tr>
-                        <th class="py-3 px-5">File</th>
-                        <th class="py-3 px-5">{{ $isEn ? 'Utility & month' : 'Jenis & bulan' }}</th>
-                        <th class="py-3 px-5 text-right">{{ $isEn ? 'Total' : 'Total' }}</th>
-                        <th class="py-3 px-5">{{ $isEn ? 'Uploaded by (WITA)' : 'Diunggah oleh (WITA)' }}</th>
-                        @if ($canDeletePomec)
-                            <th class="py-3 px-5"><span class="sr-only">{{ $isEn ? 'Action' : 'Aksi' }}</span></th>
-                        @endif
-                    </tr>
-                </thead>
+    {{-- Satu unggahan = satu laporan Engineering: Draft → Submitted → Review → Returned / Reviewed. --}}
+    <section class="{{ $pomecCard }} overflow-hidden" aria-labelledby="pomec-reports-title">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+            <div>
+                <h3 id="pomec-reports-title" class="text-sm font-heading font-bold text-navy">
+                    {{ $isEn ? 'POMEC Reports' : 'Laporan POMEC' }}
+                    <span id="pomec-batch-count" class="ml-1 font-mono-num text-slate-500">{{ $pomecImports->count() }}</span>
+                </h3>
+                <p class="text-xs text-slate-500">{{ $isEn ? 'Each upload forms one report for Head of Department verification.' : 'Setiap unggahan menjadi satu laporan untuk diverifikasi Head of Department.' }}</p>
+            </div>
+            <div role="group" aria-label="Status" class="flex flex-wrap gap-1 p-1 rounded-xl bg-slate-100">
+                @foreach ($isEn ? ['all' => 'All', 'draft' => 'Draft', 'submitted' => 'Awaiting HOD', 'in_review' => 'In review', 'returned' => 'Returned', 'reviewed' => 'Approved'] : ['all' => 'Semua', 'draft' => 'Draft', 'submitted' => 'Menunggu HOD', 'in_review' => 'Diperiksa', 'returned' => 'Dikembalikan', 'reviewed' => 'Disetujui'] as $key => $label)
+                    <button type="button" data-pomec-status="{{ $key }}" aria-pressed="{{ $key === 'all' ? 'true' : 'false' }}" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-navy aria-pressed:bg-white aria-pressed:!text-navy aria-pressed:shadow-sm dark:aria-pressed:bg-[#2C374B] dark:aria-pressed:!text-white transition cursor-pointer">{{ $label }} <span data-count class="font-normal opacity-70"></span></button>
+                @endforeach
+            </div>
+        </div>
+        {{-- relative: label sr-only (absolute) di kepala tabel tidak bocor keluar area gulir di HP. --}}
+        <div class="relative overflow-x-auto">
+            <table id="pomec-reports-table" class="w-full min-w-[860px] text-left border-collapse text-xs">
+                <thead class="bg-slate-50/70 border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wider text-slate-500"></thead>
                 <tbody id="pomec-imports-tbody" class="divide-y divide-slate-100"></tbody>
             </table>
         </div>
-    </details>
+        <div id="pomec-reports-pagination"></div>
+    </section>
 </div>
