@@ -1,6 +1,6 @@
 # Hotel Management Report System
 
-**Swiss-Belhotel Waterfront Makassar** — Internal departmental reporting, POMEC utility analytics, role-based approval workflow, audit governance, and read-only AI operational assistant.
+**Swiss-Belhotel Waterfront Makassar** — Internal departmental reporting, POMEC Control (utility monitoring), role-based approval workflow, audit governance, and read-only AI operational assistant.
 
 ---
 
@@ -12,7 +12,7 @@
   - **IT Administrator**: **System Overview**, Executive Preview, **System Topology** & live health checks, **User Management** (accounts, active sessions, RBAC matrix, report templates, database backup snapshots), **Audit Trail** center, and AI Knowledge Base administration.
 - **Departmental Reports & Workflow (`Reports`)**
   - Dynamic per-department table templates, attachment support, HOD review & revision loop, filterable searchable tables, and Excel (`.xlsx`) + PDF export (`PhpSpreadsheet` & `Dompdf`).
-- **POMEC Utility Analytics (`POMEC`)**
+- **POMEC Control (`POMEC`)**
   - Structured Excel preview/commit workflow (electricity LWBP/WBP and water consumption), interactive trend & split charts, and PDF/Excel export.
 - **Dedicated Security & Workflow Audit Center (`Audit Trail`)**
   - Sortable, multi-filter audit log viewer (`Auth`, `RBAC`, `Reports`, `POMEC`, `Topology`, `Chatbot`, `Templates`, `Database`), JSON payload inspection modal, Workflow Approval audit view, and CSV export.

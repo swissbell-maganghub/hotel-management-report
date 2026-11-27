@@ -14,6 +14,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Manual Department Report Form
+    |--------------------------------------------------------------------------
+    | Disabled: departments no longer fill reports by hand (Engineering reports
+    | come from POMEC Control uploads). Existing reports stay viewable and
+    | reviewable. Set HOTEL_MANUAL_REPORTS=true to bring the form back.
+    */
+    'manual_reports' => (bool) env('HOTEL_MANUAL_REPORTS', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | POMEC Temporary Preview Retention (Hours)
     |--------------------------------------------------------------------------
     */

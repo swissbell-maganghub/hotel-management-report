@@ -39,8 +39,9 @@
         font-family: var(--font-heading);
     }
 
+    /* Angka memakai font teks (bukan font kode); lebarnya diseragamkan supaya kolom tetap lurus. */
     .font-mono-num {
-        font-family: var(--font-mono);
+        font-family: var(--font-sans);
         font-variant-numeric: tabular-nums;
     }
 
@@ -404,6 +405,7 @@ html.dark .bg-slate-100\/70 {
 }
 
 html.dark .bg-slate-200\/60,
+html.dark .bg-slate-200\/70,
 html.dark .bg-gray-200 {
     background-color: rgba(38, 46, 64, 0.82);
 }

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class PomecImport extends Model
 {
@@ -17,6 +18,7 @@ class PomecImport extends Model
         'stored_path',
         'total_rows',
         'total_usage',
+        'total_cost',
         'status',
         'uploaded_by',
         'committed_at',
@@ -26,6 +28,7 @@ class PomecImport extends Model
     {
         return [
             'total_usage' => 'decimal:2',
+            'total_cost' => 'decimal:2',
             'committed_at' => 'datetime',
         ];
     }
@@ -33,6 +36,12 @@ class PomecImport extends Model
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    /** Laporan Engineering (alur Draft → Reviewed) untuk unggahan ini. */
+    public function report(): HasOne
+    {
+        return $this->hasOne(DepartmentReport::class);
     }
 
     public function records(): HasMany
