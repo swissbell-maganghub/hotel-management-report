@@ -225,6 +225,36 @@ class User extends Authenticatable
         return $engId ? $this->canInputDepartment((int) $engId) : false;
     }
 
+    // [WASTAGE-REPORT] Akses ke Wastage Report (Executive & staff F&B)
+    public static function fnbDepartmentId(): ?int
+    {
+        return Department::where('code', 'FNB')->value('id');
+    }
+
+    public function canAccessWastage(): bool
+    {
+        if ($this->canAccessAllDepartments()) {
+            return true;
+        }
+
+        $fnbId = self::fnbDepartmentId();
+        return $fnbId ? $this->canViewDepartment((int) $fnbId) : false;
+    }
+
+    public function canModifyWastage(): bool
+    {
+        if ($this->isItAdmin()) {
+            return true;
+        }
+
+        if ($this->isGm()) {
+            return false;
+        }
+
+        $fnbId = self::fnbDepartmentId();
+        return $fnbId ? $this->canInputDepartment((int) $fnbId) : false;
+    }
+
     public function roleLabel(string $locale = 'id'): string
     {
         return match ($this->role) {

@@ -626,6 +626,12 @@ function initWorkspace() {
         document.querySelectorAll('.workspace-panel').forEach((p) => p.classList.add('hidden'));
         document.getElementById(`tab-panel-${tabKey}`)?.classList.remove('hidden');
 
+        // [WASTAGE-REPORT] Sembunyikan KPI Row utama saat berada di tab wastage
+        const mainKpiRow = document.getElementById('workspace-kpi-row');
+        if (mainKpiRow) {
+            mainKpiRow.classList.toggle('hidden', tabKey === 'wastage');
+        }
+
         document.querySelectorAll('.workspace-tab-btn').forEach((btn) => {
             const active = btn.dataset.tab === tabKey;
             btn.className = 'workspace-tab-btn w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ' +
@@ -667,11 +673,11 @@ function initWorkspace() {
             syncReportDepartmentSubmenus();
         }
 
-        if (tabKey === 'dashboard' || tabKey === 'executive' || tabKey === 'reports' || tabKey === 'pomec') {
+        if (tabKey === 'dashboard' || tabKey === 'executive' || tabKey === 'reports' || tabKey === 'pomec' || tabKey === 'wastage') {
             const shouldAnimateReveal = !revealedChartTabs.has(tabKey);
             revealedChartTabs.add(tabKey);
             window.requestAnimationFrame(() => {
-                ['gm-chart-pomec-trend', 'gm-chart-report-status', 'gm-chart-hk-rooms', 'reports-chart-status', 'reports-chart-trend', 'reports-chart-dept', 'pomec-chart-trend', 'pomec-chart-split'].forEach((id) => {
+                ['gm-chart-pomec-trend', 'gm-chart-report-status', 'gm-chart-hk-rooms', 'reports-chart-status', 'reports-chart-trend', 'reports-chart-dept', 'pomec-chart-trend', 'pomec-chart-split', 'wastage-chart-daily', 'wastage-chart-monthly', 'wastage-chart-yearly'].forEach((id) => {
                     const c = document.getElementById(id);
                     const chart = c ? Chart.getChart(c) : null;
                     if (!chart) return;
@@ -2169,6 +2175,1121 @@ function initWorkspace() {
             }
         }
     }
+
+    // [WASTAGE-REPORT] START: Grafik Food Waste Harian (weekend/event), Bulanan (komposisi + MoM), dan Tahunan (YTD + evaluasi)
+    const wastageChartData = boot.wastageCharts || {
+        daily: [],
+        monthly: [],
+        yearly: [],
+        years: [new Date().getFullYear()],
+        defaultMonth: '',
+        defaultYear: new Date().getFullYear(),
+        categoriesMeta: [],
+    };
+
+    const wastageDefaultYear = Number(wastageChartData.defaultYear) || new Date().getFullYear();
+
+    const wastageChartState = {
+        date: 'last30', // 'last30', 'last7', 'all', atau 'YYYY-MM-DD'
+        month: 'all', // 'all' (seluruh 12 bulan di year) atau 'YYYY-MM'
+        year: wastageDefaultYear,
+        yearlyFilter: `ytd:${wastageDefaultYear}`, // 'ytd:YYYY', 'all', atau 'cat:YYYY'
+    };
+
+    function getWastageMonthLabels(short = true) {
+        if (IS_EN) {
+            return short
+                ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        }
+        return short
+            ? ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+            : ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    }
+
+    function getWastageDayShort(dayOfWeek) {
+        const names = IS_EN
+            ? ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            : ['', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+        return names[Number(dayOfWeek) || 0] || '';
+    }
+
+    function formatWastageDate(isoDate, withYear = true) {
+        const opts = { timeZone: 'Asia/Makassar', day: '2-digit', month: 'short' };
+        if (withYear) opts.year = 'numeric';
+        return new Intl.DateTimeFormat(IS_EN ? 'en-GB' : 'id-ID', opts).format(new Date(`${isoDate}T12:00:00+08:00`));
+    }
+
+    function formatWastageKg(val) {
+        return Number(val || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatWastageInt(val) {
+        return Number(val || 0).toLocaleString('id-ID');
+    }
+
+    function formatWastageRatio(val) {
+        return Number(val || 0).toFixed(4);
+    }
+
+    function getFilteredWastageDates() {
+        const allDaily = wastageChartData.daily || [];
+        if (wastageChartState.month !== 'all') {
+            return allDaily.filter((d) => d.month === wastageChartState.month);
+        }
+        const inYear = allDaily.filter((d) => d.month.startsWith(`${wastageChartState.year}-`));
+        return inYear.length > 0 ? inYear : allDaily;
+    }
+
+    function populateWastageMonthFilter() {
+        const monthSelect = document.getElementById('wastage-chart-month-filter');
+        if (!monthSelect) return;
+
+        const years = Array.isArray(wastageChartData.years) && wastageChartData.years.length > 0
+            ? wastageChartData.years
+            : [wastageChartState.year];
+        const monthlyMap = new Map((wastageChartData.monthly || []).map((m) => [m.month, m]));
+        const fullNames = getWastageMonthLabels(false);
+
+        const buildYearOptions = (container, yr) => {
+            const allOpt = document.createElement('option');
+            allOpt.value = `all:${yr}`;
+            allOpt.textContent = IS_EN ? `All Months (${yr})` : `Semua Bulan (${yr})`;
+            container.appendChild(allOpt);
+
+            for (let m = 1; m <= 12; m++) {
+                const key = `${yr}-${String(m).padStart(2, '0')}`;
+                const rec = monthlyMap.get(key);
+                const opt = document.createElement('option');
+                opt.value = key;
+                const daysSuffix = rec && rec.days > 0
+                    ? ` • (${rec.days} ${IS_EN ? 'days' : 'hari'})`
+                    : '';
+                opt.textContent = `${fullNames[m - 1]} ${yr}${daysSuffix}`;
+                container.appendChild(opt);
+            }
+        };
+
+        monthSelect.innerHTML = '';
+        if (years.length === 1) {
+            buildYearOptions(monthSelect, years[0]);
+        } else {
+            years.forEach((yr) => {
+                const group = document.createElement('optgroup');
+                group.label = IS_EN ? `Year ${yr}` : `Tahun ${yr}`;
+                buildYearOptions(group, yr);
+                monthSelect.appendChild(group);
+            });
+        }
+
+        monthSelect.value = wastageChartState.month === 'all'
+            ? `all:${wastageChartState.year}`
+            : wastageChartState.month;
+    }
+
+    function populateWastageDateFilter() {
+        const dateSelect = document.getElementById('wastage-chart-date-filter');
+        if (!dateSelect) return;
+
+        const rows = getFilteredWastageDates();
+        dateSelect.innerHTML = '';
+
+        const presets = [
+            {
+                value: 'last30',
+                label: IS_EN
+                    ? `Last 30 Days (${Math.min(30, rows.length)} days)`
+                    : `30 Hari Terakhir (${Math.min(30, rows.length)} hari)`,
+            },
+            {
+                value: 'last7',
+                label: IS_EN
+                    ? `Last 7 Days (${Math.min(7, rows.length)} days)`
+                    : `7 Hari Terakhir (${Math.min(7, rows.length)} hari)`,
+            },
+            {
+                value: 'all',
+                label: IS_EN
+                    ? `All Dates (${rows.length} days)`
+                    : `Semua Tanggal (${rows.length} hari)`,
+            },
+        ];
+
+        presets.forEach((p) => {
+            const opt = document.createElement('option');
+            opt.value = p.value;
+            opt.textContent = p.label;
+            dateSelect.appendChild(opt);
+        });
+
+        if (rows.length > 0) {
+            const dateGroup = document.createElement('optgroup');
+            dateGroup.label = IS_EN ? 'Specific Date Details' : 'Rincian Tanggal Tertentu';
+            rows.forEach((row) => {
+                const opt = document.createElement('option');
+                opt.value = row.date;
+                const dayShort = getWastageDayShort(row.day_of_week);
+                const dayBadge = dayShort ? ` (${dayShort})` : '';
+                const eventFlag = row.is_high_cover ? ' ★' : '';
+                opt.textContent = `${formatWastageDate(row.date, true)}${dayBadge}${eventFlag} • ${formatWastageKg(row.total_kg)} KG`;
+                dateGroup.appendChild(opt);
+            });
+            dateSelect.appendChild(dateGroup);
+        }
+
+        const isPreset = wastageChartState.date === 'last30' || wastageChartState.date === 'last7' || wastageChartState.date === 'all';
+        const hasSelectedDate = rows.some((r) => r.date === wastageChartState.date);
+        if (!isPreset && !hasSelectedDate) {
+            wastageChartState.date = 'last30';
+        }
+        dateSelect.value = wastageChartState.date;
+    }
+
+    function populateWastageYearlyFilter() {
+        const yearlySelect = document.getElementById('wastage-chart-yearly-filter');
+        if (!yearlySelect) return;
+
+        const years = Array.isArray(wastageChartData.years) && wastageChartData.years.length > 0
+            ? wastageChartData.years
+            : [wastageChartState.year];
+
+        yearlySelect.innerHTML = '';
+
+        years.forEach((yr) => {
+            const opt = document.createElement('option');
+            opt.value = `ytd:${yr}`;
+            opt.textContent = IS_EN ? `YTD Summary ${yr}` : `Ringkasan YTD ${yr}`;
+            yearlySelect.appendChild(opt);
+        });
+
+        const allOpt = document.createElement('option');
+        allOpt.value = 'all';
+        allOpt.textContent = IS_EN
+            ? `Multi-Year Comparison (${years.length} yrs)`
+            : `Perbandingan Multi-Tahun (${years.length} thn)`;
+        yearlySelect.appendChild(allOpt);
+
+        years.forEach((yr) => {
+            const opt = document.createElement('option');
+            opt.value = `cat:${yr}`;
+            opt.textContent = IS_EN ? `Category Composition ${yr}` : `Komposisi Kategori ${yr}`;
+            yearlySelect.appendChild(opt);
+        });
+
+        const validValues = new Set(Array.from(yearlySelect.options).map((o) => o.value));
+        if (!validValues.has(wastageChartState.yearlyFilter)) {
+            wastageChartState.yearlyFilter = `ytd:${years[0]}`;
+        }
+        yearlySelect.value = wastageChartState.yearlyFilter;
+    }
+
+    function buildWastageRatioDataset(data, yAxisID = 'y1', label = 'KG / Cover') {
+        const lineColor = isDarkTheme() ? '#48B8C7' : '#1E6B7B';
+        return {
+            type: 'line',
+            label,
+            data,
+            spanGaps: true,
+            borderColor: lineColor,
+            backgroundColor: makeChartAreaGradient(
+                isDarkTheme() ? 'rgba(72, 184, 199, 0.22)' : 'rgba(30, 107, 123, 0.16)',
+                'rgba(30, 107, 123, 0.0)'
+            ),
+            fill: true,
+            borderWidth: 2.25,
+            pointRadius: 3.5,
+            pointBackgroundColor: lineColor,
+            pointBorderColor: chartPointBorderColor(),
+            pointBorderWidth: 1.5,
+            pointHoverRadius: 5.5,
+            pointHoverBorderWidth: 2,
+            tension: 0.35,
+            yAxisID,
+            order: 0,
+        };
+    }
+
+    function buildWastageComboOptions(rowsForTooltip, mode = 'daily', opts = {}) {
+        const stacked = !!opts.stacked;
+        const yearlyYtd = !!opts.yearlyYtd;
+        const yearlyClickable = !!opts.yearlyClickable;
+        const y1Unit = opts.y1Unit || 'ratio';
+        const hasY2 = !!opts.hasY2;
+        const fullNames = getWastageMonthLabels(false);
+
+        const scales = {
+            x: { stacked, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
+            y: {
+                stacked,
+                position: 'left',
+                beginAtZero: true,
+                grid: { color: chartGridColor() },
+                border: { display: false },
+                ticks: { font: { size: 10 }, callback: (v) => `${Number(v).toLocaleString('id-ID')} KG` },
+            },
+            y1: {
+                position: 'right',
+                beginAtZero: true,
+                grid: { drawOnChartArea: false },
+                border: { display: false },
+                ticks: {
+                    font: { size: 10 },
+                    callback: (v) => (y1Unit === 'covers' ? Number(v).toLocaleString('id-ID') : Number(v).toFixed(3)),
+                },
+            },
+        };
+
+        if (hasY2) {
+            scales.y2 = {
+                position: 'right',
+                beginAtZero: true,
+                grid: { drawOnChartArea: false },
+                border: { display: false },
+                ticks: { font: { size: 10 }, callback: (v) => Number(v).toFixed(3) },
+            };
+        }
+
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: chartStagger(18, 200),
+            interaction: { mode: 'index', intersect: false },
+            onHover(event, elements) {
+                const target = event?.native?.target;
+                if (!target) return;
+                const canClick = mode === 'daily' || mode === 'monthly' || (mode === 'yearly' && yearlyClickable);
+                target.style.cursor = canClick && elements.length ? 'pointer' : 'default';
+            },
+            onClick(_event, elements) {
+                if (!elements.length) return;
+                const idx = elements[0].index;
+                if (mode === 'monthly') {
+                    const targetMonth = `${wastageChartState.year}-${String(idx + 1).padStart(2, '0')}`;
+                    wastageChartState.month = targetMonth;
+                    wastageChartState.date = 'last30';
+                    const monthSelect = document.getElementById('wastage-chart-month-filter');
+                    if (monthSelect) monthSelect.value = targetMonth;
+                    populateWastageDateFilter();
+                    renderWastageCharts();
+                } else if (mode === 'daily') {
+                    const clickedRow = rowsForTooltip[idx];
+                    if (!clickedRow) return;
+                    wastageChartState.date = clickedRow.date;
+                    const dateSelect = document.getElementById('wastage-chart-date-filter');
+                    if (dateSelect) dateSelect.value = clickedRow.date;
+                    renderWastageCharts();
+                } else if (mode === 'yearly' && yearlyClickable) {
+                    const clickedYear = rowsForTooltip[idx];
+                    if (!clickedYear || !clickedYear.year) return;
+                    wastageChartState.yearlyFilter = `ytd:${clickedYear.year}`;
+                    const yearlySelect = document.getElementById('wastage-chart-yearly-filter');
+                    if (yearlySelect) yearlySelect.value = wastageChartState.yearlyFilter;
+                    renderWastageCharts();
+                }
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    align: 'end',
+                    labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'circle', font: { size: 11, weight: '600' } },
+                },
+                tooltip: {
+                    callbacks: {
+                        title(items) {
+                            if (!items.length) return '';
+                            const row = rowsForTooltip[items[0].dataIndex];
+                            if (mode === 'daily' && row) {
+                                const dayShort = getWastageDayShort(row.day_of_week);
+                                return `${formatWastageDate(row.date, true)}${dayShort ? ` (${dayShort})` : ''}`;
+                            }
+                            if (mode === 'monthly' && row?.month) {
+                                const parts = row.month.split('-');
+                                const mIdx = Math.max(0, Number(parts[1]) - 1);
+                                return `${fullNames[mIdx] || parts[1]} ${parts[0]}`;
+                            }
+                            return items[0].label;
+                        },
+                        label(ctx) {
+                            const val = ctx.parsed.y;
+                            if (val === null || val === undefined) return `${ctx.dataset.label}: -`;
+                            if (ctx.dataset.yAxisID === 'y2' || (ctx.dataset.yAxisID === 'y1' && y1Unit !== 'covers')) {
+                                return `${ctx.dataset.label}: ${formatWastageRatio(val)} KG/Cov`;
+                            }
+                            if (ctx.dataset.yAxisID === 'y1' && y1Unit === 'covers') {
+                                return `${ctx.dataset.label}: ${formatWastageInt(val)} covers`;
+                            }
+                            return `${ctx.dataset.label}: ${formatWastageKg(val)} KG`;
+                        },
+                        afterBody(items) {
+                            if (!items.length) return [];
+                            const row = rowsForTooltip[items[0].dataIndex];
+                            if (!row) return [];
+
+                            const lines = [];
+                            if (mode === 'daily') {
+                                lines.push(`Cover: ${formatWastageInt(row.covers)}`);
+                                if (row.covers > 0) {
+                                    lines.push(`${(Number(row.kg_per_cover || 0) * 1000).toFixed(1)} g / ${IS_EN ? 'cover' : 'tamu'}`);
+                                }
+                                if (row.is_weekend) {
+                                    lines.push(IS_EN ? 'Marker: Weekend (Sat/Sun)' : 'Penanda: Akhir Pekan (Sabtu/Minggu)');
+                                }
+                                if (row.is_high_cover) {
+                                    lines.push(IS_EN ? 'Marker: High Cover / Event Day' : 'Penanda: Cover Tinggi / Event');
+                                }
+                                if (row.notes) {
+                                    lines.push(`${IS_EN ? 'Note' : 'Catatan'}: ${row.notes}`);
+                                }
+                            } else if (mode === 'monthly') {
+                                lines.push(`TOTAL KG: ${formatWastageKg(row.total_kg)} KG`);
+                                lines.push(`Cover: ${formatWastageInt(row.covers)}`);
+                                lines.push(IS_EN ? `Days recorded: ${row.days || 0} days` : `Jumlah hari: ${row.days || 0} hari`);
+                                if (row.mom_ratio_pct !== null && row.mom_ratio_pct !== undefined) {
+                                    const signR = row.mom_ratio_pct > 0 ? '+' : '';
+                                    const signK = row.mom_kg_pct > 0 ? '+' : '';
+                                    lines.push(
+                                        IS_EN
+                                            ? `MoM vs prev active month: KG ${signK}${row.mom_kg_pct.toFixed(1)}% • KG/Cov ${signR}${row.mom_ratio_pct.toFixed(1)}%`
+                                            : `MoM vs bulan aktif sblm: KG ${signK}${row.mom_kg_pct.toFixed(1)}% • KG/Cov ${signR}${row.mom_ratio_pct.toFixed(1)}%`
+                                    );
+                                }
+                            } else if (mode === 'yearly') {
+                                if (yearlyYtd) {
+                                    lines.push(IS_EN ? `Month Waste: ${formatWastageKg(row.total_kg)} KG` : `Waste Bulan Ini: ${formatWastageKg(row.total_kg)} KG`);
+                                    lines.push(IS_EN ? `Month Cover: ${formatWastageInt(row.covers)}` : `Cover Bulan Ini: ${formatWastageInt(row.covers)}`);
+                                    lines.push(IS_EN ? `Days recorded: ${row.days || 0} days` : `Jumlah hari: ${row.days || 0} hari`);
+                                } else {
+                                    lines.push(IS_EN ? `Active months: ${row.months || 0}/12` : `Bulan aktif: ${row.months || 0}/12`);
+                                    lines.push(IS_EN ? `Days recorded: ${row.days || 0} days` : `Jumlah hari: ${row.days || 0} hari`);
+                                    lines.push(
+                                        IS_EN
+                                            ? `Next Year Target (-10%): ${formatWastageRatio(row.target_next_year_kg_per_cover)} KG/Cov`
+                                            : `Target Efisiensi (-10%): ${formatWastageRatio(row.target_next_year_kg_per_cover)} KG/Cov`
+                                    );
+                                }
+                            }
+                            return lines;
+                        },
+                    },
+                },
+            },
+            scales,
+        };
+    }
+
+    function renderWastageCategoryBreakdownChart(canvas, categoriesMap, barColor) {
+        const meta = wastageChartData.categoriesMeta || [];
+        const labels = meta.map((m) => m.label);
+        const values = meta.map((m) => Number(categoriesMap?.[m.key] || 0));
+
+        upsertChart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: IS_EN ? 'Waste by Category (KG)' : 'Sampah per Kategori (KG)',
+                        data: values,
+                        backgroundColor: barColor,
+                        borderRadius: { topLeft: 4, topRight: 4 },
+                        barPercentage: 0.62,
+                        categoryPercentage: 0.78,
+                        maxBarThickness: 32,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: chartStagger(18, 200),
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        align: 'end',
+                        labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'circle', font: { size: 11, weight: '600' } },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title(items) {
+                                if (!items.length) return '';
+                                const m = meta[items[0].dataIndex];
+                                return m ? `${m.category} • ${m.label}` : items[0].label;
+                            },
+                            label(ctx) {
+                                return `${formatWastageKg(ctx.parsed.y)} KG`;
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: { stacked: false, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 }, maxRotation: 30, minRotation: 0 } },
+                    y: {
+                        stacked: false,
+                        beginAtZero: true,
+                        grid: { color: chartGridColor() },
+                        border: { display: false },
+                        ticks: { font: { size: 10 }, callback: (v) => `${Number(v).toLocaleString('id-ID')} KG` },
+                    },
+                },
+            },
+        });
+    }
+
+    function renderWastageDailyLegend(showLegend) {
+        const legendEl = document.getElementById('wastage-chart-daily-legend');
+        if (!legendEl) return;
+        if (!showLegend) {
+            legendEl.classList.add('hidden');
+            legendEl.innerHTML = '';
+            return;
+        }
+        const ratioColor = isDarkTheme() ? '#48B8C7' : '#1E6B7B';
+        const items = [
+            { color: '#F59E0B', label: IS_EN ? 'Weekday Normal' : 'Hari Kerja Normal' },
+            { color: '#F04E30', label: IS_EN ? 'Weekend (Sat/Sun)' : 'Akhir Pekan (Sabtu/Minggu)' },
+            { color: '#8B5CF6', label: IS_EN ? 'Event / High Cover (★)' : 'Event / Cover Tinggi (★)' },
+            { color: ratioColor, label: 'KG / Cover', isLine: true },
+        ];
+        legendEl.classList.remove('hidden');
+        legendEl.innerHTML = items.map((item) => {
+            const swatch = item.isLine
+                ? `<span class="inline-block w-3 h-0.5 rounded-full" style="background-color:${item.color}"></span>`
+                : `<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color:${item.color}"></span>`;
+            return `<span class="inline-flex items-center gap-1.5">${swatch}<span>${escapeHtml(item.label)}</span></span>`;
+        }).join('');
+    }
+
+    function renderWastageMonthlyMom(selectedMonth, fullNames) {
+        const momEl = document.getElementById('wastage-chart-monthly-mom');
+        if (!momEl) return;
+
+        const activeMonths = (wastageChartData.monthly || [])
+            .filter((m) => Number(m.total_kg || 0) > 0 || Number(m.days || 0) > 0)
+            .sort((a, b) => a.month.localeCompare(b.month));
+
+        if (activeMonths.length < 2) {
+            momEl.classList.add('hidden');
+            momEl.innerHTML = '';
+            return;
+        }
+
+        let currRec = null;
+        let prevRec = null;
+        if (selectedMonth !== 'all') {
+            const idx = activeMonths.findIndex((m) => m.month === selectedMonth);
+            if (idx > 0) {
+                currRec = activeMonths[idx];
+                prevRec = activeMonths[idx - 1];
+            }
+        }
+        if (!currRec || !prevRec) {
+            const inYear = activeMonths.filter((m) => m.month.startsWith(`${wastageChartState.year}-`));
+            const pool = inYear.length >= 2 ? inYear : activeMonths;
+            currRec = pool[pool.length - 1];
+            prevRec = pool[pool.length - 2];
+        }
+
+        const formatMonthShort = (ym) => {
+            const [y, m] = ym.split('-');
+            return `${fullNames[Math.max(0, Number(m) - 1)] || m} ${y}`;
+        };
+
+        const kgDiffPct = Number(prevRec.total_kg || 0) > 0
+            ? ((Number(currRec.total_kg || 0) - Number(prevRec.total_kg || 0)) / Number(prevRec.total_kg)) * 100
+            : 0;
+        const ratioDiffPct = Number(prevRec.kg_per_cover || 0) > 0
+            ? ((Number(currRec.kg_per_cover || 0) - Number(prevRec.kg_per_cover || 0)) / Number(prevRec.kg_per_cover)) * 100
+            : 0;
+
+        const improved = ratioDiffPct < -0.5;
+        const worsened = ratioDiffPct > 0.5;
+        const badgeCls = improved
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : (worsened ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-600 border-slate-200');
+        const badgeLabel = improved
+            ? (IS_EN ? 'Waste Efficiency Improved' : 'Efisiensi Membaik')
+            : (worsened ? (IS_EN ? 'Ratio Increased' : 'Rasio Meningkat') : (IS_EN ? 'Stable' : 'Stabil'));
+
+        const signKg = kgDiffPct > 0 ? '+' : '';
+        const signRatio = ratioDiffPct > 0 ? '+' : '';
+
+        momEl.classList.remove('hidden');
+        momEl.innerHTML = `
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-slate-600">
+                    <span class="font-semibold text-navy">${escapeHtml(formatMonthShort(prevRec.month))}</span>
+                    <span class="mx-1 text-slate-400">vs</span>
+                    <span class="font-semibold text-navy">${escapeHtml(formatMonthShort(currRec.month))}</span>
+                    <span class="mx-1.5 text-slate-300">•</span>
+                    <span class="font-mono-num">KG: ${signKg}${kgDiffPct.toFixed(1)}%</span>
+                    <span class="mx-1 text-slate-300">|</span>
+                    <span class="font-mono-num">KG/Cov: ${signRatio}${ratioDiffPct.toFixed(1)}%</span>
+                </div>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold ${badgeCls}">
+                    ${escapeHtml(badgeLabel)}
+                </span>
+            </div>
+        `;
+    }
+
+    function renderWastageYearlyEval(yrRec) {
+        const evalEl = document.getElementById('wastage-chart-yearly-eval');
+        if (!evalEl) return;
+        if (!yrRec) {
+            evalEl.classList.add('hidden');
+            evalEl.innerHTML = '';
+            return;
+        }
+
+        const nextYear = Number(yrRec.year) + 1;
+        const avgGrams = (Number(yrRec.avg_kg_per_cover || 0) * 1000).toFixed(1);
+        const targetGrams = (Number(yrRec.target_next_year_kg_per_cover || 0) * 1000).toFixed(1);
+
+        evalEl.classList.remove('hidden');
+        evalEl.innerHTML = `
+            <div class="rounded-lg border border-slate-200/80 bg-white px-3 py-2.5">
+                <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+                    ${IS_EN ? `Cumulative YTD (${escapeHtml(String(yrRec.year))})` : `Kumulatif YTD (${escapeHtml(String(yrRec.year))})`}
+                </div>
+                <div class="mt-0.5 text-sm font-bold font-mono-num text-navy">
+                    ${formatWastageKg(yrRec.ytd_kg)} KG <span class="text-slate-400 font-normal">/</span> ${formatWastageInt(yrRec.ytd_cover)} cover
+                </div>
+                <div class="text-[11px] text-slate-500 mt-0.5">
+                    ${yrRec.months || 0}/12 ${IS_EN ? 'active months' : 'bulan aktif'} • ${yrRec.days || 0} ${IS_EN ? 'days' : 'hari'}
+                </div>
+            </div>
+            <div class="rounded-lg border border-slate-200/80 bg-white px-3 py-2.5">
+                <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+                    ${IS_EN ? 'Annual Avg KG / Cover' : 'Rata-rata Tahunan KG / Cover'}
+                </div>
+                <div class="mt-0.5 text-sm font-bold font-mono-num text-teal">
+                    ${formatWastageRatio(yrRec.avg_kg_per_cover)} KG/Cov
+                </div>
+                <div class="text-[11px] text-slate-500 mt-0.5">
+                    ≈ ${avgGrams} g / ${IS_EN ? 'cover' : 'tamu'}
+                </div>
+            </div>
+            <div class="rounded-lg border border-slate-200/80 bg-white px-3 py-2.5">
+                <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+                    ${IS_EN ? `${nextYear} Efficiency Target (-10%)` : `Target Efisiensi ${nextYear} (-10%)`}
+                </div>
+                <div class="mt-0.5 text-sm font-bold font-mono-num text-navy">
+                    ≤ ${formatWastageRatio(yrRec.target_next_year_kg_per_cover)} KG/Cov
+                </div>
+                <div class="text-[11px] text-slate-500 mt-0.5">
+                    ≈ ${targetGrams} g / ${IS_EN ? 'cover' : 'tamu'} (${IS_EN ? 'mgmt benchmark' : 'acuan evaluasi'})
+                </div>
+            </div>
+        `;
+    }
+
+    function renderWastageCharts() {
+        const dailyCanvas = document.getElementById('wastage-chart-daily');
+        const monthlyCanvas = document.getElementById('wastage-chart-monthly');
+        const yearlyCanvas = document.getElementById('wastage-chart-yearly');
+        if (!dailyCanvas && !monthlyCanvas && !yearlyCanvas) return;
+
+        const fullNames = getWastageMonthLabels(false);
+        const shortNames = getWastageMonthLabels(true);
+
+        // 1. Grafik Mode Harian
+        if (dailyCanvas) {
+            const allFilteredRows = getFilteredWastageDates();
+            const dailyMeta = document.getElementById('wastage-chart-daily-meta');
+            const dailyEmpty = document.getElementById('wastage-chart-daily-empty');
+            const isPreset = wastageChartState.date === 'last30' || wastageChartState.date === 'last7' || wastageChartState.date === 'all';
+
+            if (!isPreset) {
+                const selectedRow = allFilteredRows.find((r) => r.date === wastageChartState.date);
+                renderWastageDailyLegend(false);
+                if (!selectedRow) {
+                    Chart.getChart(dailyCanvas)?.destroy();
+                    if (dailyMeta) dailyMeta.textContent = '0 KG';
+                    if (dailyEmpty) {
+                        dailyEmpty.textContent = IS_EN ? 'No food waste data for the selected date.' : 'Tidak ada data food waste untuk tanggal ini.';
+                        dailyEmpty.classList.remove('hidden');
+                    }
+                } else {
+                    if (dailyEmpty) dailyEmpty.classList.add('hidden');
+                    if (dailyMeta) {
+                        const dayShort = getWastageDayShort(selectedRow.day_of_week);
+                        const dayBadge = dayShort ? ` (${dayShort})` : '';
+                        dailyMeta.textContent = `${formatWastageDate(selectedRow.date, true)}${dayBadge} • ${formatWastageKg(selectedRow.total_kg)} KG • ${formatWastageInt(selectedRow.covers)} cover • ${formatWastageRatio(selectedRow.kg_per_cover)} KG/Cov`;
+                    }
+                    const singleColor = selectedRow.is_weekend ? '#F04E30' : (selectedRow.is_high_cover ? '#8B5CF6' : '#F59E0B');
+                    renderWastageCategoryBreakdownChart(dailyCanvas, selectedRow.categories, singleColor);
+                }
+            } else {
+                let dailyRows = allFilteredRows;
+                if (wastageChartState.date === 'last30') {
+                    dailyRows = allFilteredRows.slice(-30);
+                } else if (wastageChartState.date === 'last7') {
+                    dailyRows = allFilteredRows.slice(-7);
+                }
+
+                if (dailyRows.length === 0) {
+                    Chart.getChart(dailyCanvas)?.destroy();
+                    renderWastageDailyLegend(false);
+                    if (dailyMeta) dailyMeta.textContent = IS_EN ? '0 days' : '0 hari';
+                    if (dailyEmpty) {
+                        dailyEmpty.textContent = IS_EN
+                            ? 'No daily food waste records available.'
+                            : 'Belum ada data harian food waste untuk ditampilkan.';
+                        dailyEmpty.classList.remove('hidden');
+                    }
+                } else {
+                    if (dailyEmpty) dailyEmpty.classList.add('hidden');
+                    renderWastageDailyLegend(true);
+                    const sumKg = dailyRows.reduce((s, r) => s + Number(r.total_kg || 0), 0);
+                    const sumCovers = dailyRows.reduce((s, r) => s + Number(r.covers || 0), 0);
+                    const weekendCount = dailyRows.filter((r) => r.is_weekend).length;
+                    const eventCount = dailyRows.filter((r) => r.is_high_cover).length;
+                    if (dailyMeta) {
+                        dailyMeta.textContent = `${dailyRows.length} ${IS_EN ? 'days' : 'hari'} • ${formatWastageKg(sumKg)} KG • ${formatWastageInt(sumCovers)} cover • ${weekendCount} weekend • ${eventCount} ${IS_EN ? 'high-cover/event' : 'event/cover tinggi'}`;
+                    }
+
+                    const dailyBarColors = dailyRows.map((r) => (r.is_weekend ? '#F04E30' : (r.is_high_cover ? '#8B5CF6' : '#F59E0B')));
+                    const dailyLabels = dailyRows.map((d) => {
+                        const base = formatWastageDate(d.date, false);
+                        const dayBadge = d.is_weekend ? ` (${getWastageDayShort(d.day_of_week)})` : '';
+                        const star = d.is_high_cover ? ' ★' : '';
+                        return `${base}${dayBadge}${star}`;
+                    });
+
+                    upsertChart(dailyCanvas, {
+                        type: 'bar',
+                        data: {
+                            labels: dailyLabels,
+                            datasets: [
+                                {
+                                    label: 'TOTAL KG/Day',
+                                    data: dailyRows.map((r) => Number(r.total_kg || 0)),
+                                    backgroundColor: dailyBarColors,
+                                    borderRadius: { topLeft: 4, topRight: 4 },
+                                    yAxisID: 'y',
+                                    barPercentage: 0.62,
+                                    categoryPercentage: 0.74,
+                                    maxBarThickness: 28,
+                                    order: 2,
+                                },
+                                buildWastageRatioDataset(dailyRows.map((r) => (r.covers > 0 ? Number(r.kg_per_cover || 0) : null)), 'y1', 'KG / Cover'),
+                            ],
+                        },
+                        options: buildWastageComboOptions(dailyRows, 'daily', { stacked: false, y1Unit: 'ratio' }),
+                    });
+                }
+            }
+        }
+
+        // 2. Grafik Mode Bulanan (Stacked Bar 4 Kelompok Kategori + Rata-rata KG/COVER + MoM)
+        if (monthlyCanvas) {
+            const year = Number(wastageChartState.year);
+            const monthlyMap = new Map((wastageChartData.monthly || []).map((m) => [m.month, m]));
+            const monthlyMeta = document.getElementById('wastage-chart-monthly-meta');
+            const monthlyEmpty = document.getElementById('wastage-chart-monthly-empty');
+            const monthlyBlue = isDarkTheme() ? '#38BDF8' : '#2563EB';
+
+            renderWastageMonthlyMom(wastageChartState.month, fullNames);
+
+            if (wastageChartState.month !== 'all') {
+                const rec = monthlyMap.get(wastageChartState.month);
+                const mParts = wastageChartState.month.split('-');
+                const mLabel = mParts.length === 2
+                    ? `${fullNames[Math.max(0, Number(mParts[1]) - 1)]} ${mParts[0]}`
+                    : wastageChartState.month;
+
+                if (!rec || (rec.days === 0 && Number(rec.total_kg || 0) === 0)) {
+                    Chart.getChart(monthlyCanvas)?.destroy();
+                    if (monthlyMeta) monthlyMeta.textContent = `${mLabel} • 0 ${IS_EN ? 'days' : 'hari'}`;
+                    if (monthlyEmpty) {
+                        monthlyEmpty.textContent = IS_EN
+                            ? `No food waste data recorded for ${mLabel}.`
+                            : `Belum ada data food waste untuk ${mLabel}.`;
+                        monthlyEmpty.classList.remove('hidden');
+                    }
+                } else {
+                    if (monthlyEmpty) monthlyEmpty.classList.add('hidden');
+                    if (monthlyMeta) {
+                        monthlyMeta.textContent = `${mLabel} • ${formatWastageKg(rec.total_kg)} KG • ${formatWastageInt(rec.covers)} cover • ${formatWastageRatio(rec.kg_per_cover)} KG/Cov`;
+                    }
+                    renderWastageCategoryBreakdownChart(monthlyCanvas, rec.categories, monthlyBlue);
+                }
+            } else {
+                if (monthlyEmpty) monthlyEmpty.classList.add('hidden');
+                const slots = [];
+                let lastActiveSlot = null;
+                for (let m = 1; m <= 12; m++) {
+                    const key = `${year}-${String(m).padStart(2, '0')}`;
+                    const existing = monthlyMap.get(key);
+                    const slot = existing
+                        ? { ...existing, groups: existing.groups || { buffet: 0, preparation: 0, plate_waste: 0, breakfast_cafe: 0 } }
+                        : { month: key, total_kg: 0, covers: 0, days: 0, kg_per_cover: 0, groups: { buffet: 0, preparation: 0, plate_waste: 0, breakfast_cafe: 0 } };
+
+                    const isActive = Number(slot.total_kg || 0) > 0 || Number(slot.days || 0) > 0;
+                    if (isActive && lastActiveSlot) {
+                        slot.mom_kg_pct = Number(lastActiveSlot.total_kg || 0) > 0
+                            ? ((Number(slot.total_kg || 0) - Number(lastActiveSlot.total_kg || 0)) / Number(lastActiveSlot.total_kg)) * 100
+                            : null;
+                        slot.mom_ratio_pct = Number(lastActiveSlot.kg_per_cover || 0) > 0
+                            ? ((Number(slot.kg_per_cover || 0) - Number(lastActiveSlot.kg_per_cover || 0)) / Number(lastActiveSlot.kg_per_cover)) * 100
+                            : null;
+                    } else {
+                        slot.mom_kg_pct = null;
+                        slot.mom_ratio_pct = null;
+                    }
+                    if (isActive) lastActiveSlot = slot;
+                    slots.push(slot);
+                }
+
+                const totalYrKg = slots.reduce((s, r) => s + Number(r.total_kg || 0), 0);
+                const totalYrCovers = slots.reduce((s, r) => s + Number(r.covers || 0), 0);
+                const filledMonths = slots.filter((r) => r.days > 0 || r.total_kg > 0).length;
+                if (monthlyMeta) {
+                    monthlyMeta.textContent = `${IS_EN ? 'Year' : 'Tahun'} ${year} • ${formatWastageKg(totalYrKg)} KG • ${formatWastageInt(totalYrCovers)} cover • ${filledMonths}/12 ${IS_EN ? 'months' : 'bulan'}`;
+                }
+
+                const dark = isDarkTheme();
+                upsertChart(monthlyCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels: shortNames,
+                        datasets: [
+                            {
+                                label: 'Buffet',
+                                data: slots.map((r) => Number(r.groups?.buffet || 0)),
+                                backgroundColor: dark ? '#3B82F6' : '#2563EB',
+                                stack: 'monthly-waste',
+                                yAxisID: 'y',
+                                barPercentage: 0.65,
+                                categoryPercentage: 0.74,
+                                maxBarThickness: 26,
+                                order: 4,
+                            },
+                            {
+                                label: 'Preparation',
+                                data: slots.map((r) => Number(r.groups?.preparation || 0)),
+                                backgroundColor: dark ? '#2DD4BF' : '#0D9488',
+                                stack: 'monthly-waste',
+                                yAxisID: 'y',
+                                barPercentage: 0.65,
+                                categoryPercentage: 0.74,
+                                maxBarThickness: 26,
+                                order: 3,
+                            },
+                            {
+                                label: 'Plate Waste',
+                                data: slots.map((r) => Number(r.groups?.plate_waste || 0)),
+                                backgroundColor: dark ? '#FBBF24' : '#F59E0B',
+                                stack: 'monthly-waste',
+                                yAxisID: 'y',
+                                barPercentage: 0.65,
+                                categoryPercentage: 0.74,
+                                maxBarThickness: 26,
+                                order: 2,
+                            },
+                            {
+                                label: 'Breakfast Swiss',
+                                data: slots.map((r) => Number(r.groups?.breakfast_cafe || 0)),
+                                backgroundColor: dark ? '#A78BFA' : '#8B5CF6',
+                                borderRadius: { topLeft: 4, topRight: 4 },
+                                stack: 'monthly-waste',
+                                yAxisID: 'y',
+                                barPercentage: 0.65,
+                                categoryPercentage: 0.74,
+                                maxBarThickness: 26,
+                                order: 1,
+                            },
+                            buildWastageRatioDataset(
+                                slots.map((r) => (r.covers > 0 ? Number(r.kg_per_cover || 0) : null)),
+                                'y1',
+                                IS_EN ? 'Monthly Avg KG/Cover' : 'Rata-rata KG/Cover'
+                            ),
+                        ],
+                    },
+                    options: buildWastageComboOptions(slots, 'monthly', { stacked: true, y1Unit: 'ratio' }),
+                });
+            }
+        }
+
+        // 3. Grafik Mode Tahunan (Tren KG YTD, COVER YTD, & Rata-rata Tahunan KG/COVER)
+        if (yearlyCanvas) {
+            const yearlyMeta = document.getElementById('wastage-chart-yearly-meta');
+            const yearlyEmpty = document.getElementById('wastage-chart-yearly-empty');
+            const yearlyList = Array.isArray(wastageChartData.yearly) ? wastageChartData.yearly : [];
+            const yearlyMap = new Map(yearlyList.map((y) => [String(y.year), y]));
+            const monthlyMap = new Map((wastageChartData.monthly || []).map((m) => [m.month, m]));
+            const modeVal = wastageChartState.yearlyFilter || `ytd:${wastageDefaultYear}`;
+            const dark = isDarkTheme();
+
+            if (modeVal === 'all') {
+                const activeYears = yearlyList.filter((y) => Number(y.ytd_kg || 0) > 0 || Number(y.days || 0) > 0);
+                if (activeYears.length === 0) {
+                    Chart.getChart(yearlyCanvas)?.destroy();
+                    renderWastageYearlyEval(null);
+                    if (yearlyMeta) yearlyMeta.textContent = IS_EN ? 'No annual data' : 'Belum ada data tahunan';
+                    if (yearlyEmpty) {
+                        yearlyEmpty.textContent = IS_EN ? 'No annual food waste records available.' : 'Belum ada data tahunan food waste untuk ditampilkan.';
+                        yearlyEmpty.classList.remove('hidden');
+                    }
+                } else {
+                    if (yearlyEmpty) yearlyEmpty.classList.add('hidden');
+                    const totalAllKg = activeYears.reduce((s, y) => s + Number(y.ytd_kg || 0), 0);
+                    const totalAllCov = activeYears.reduce((s, y) => s + Number(y.ytd_cover || 0), 0);
+                    if (yearlyMeta) {
+                        yearlyMeta.textContent = `${activeYears.length} ${IS_EN ? 'years' : 'tahun'} • ${formatWastageKg(totalAllKg)} KG • ${formatWastageInt(totalAllCov)} cover`;
+                    }
+                    const latestYrRec = yearlyMap.get(String(wastageChartState.year)) || activeYears[activeYears.length - 1];
+                    renderWastageYearlyEval(latestYrRec);
+
+                    const barEmerald = dark ? '#34D399' : '#10B981';
+                    const lineCoverBlue = dark ? '#60A5FA' : '#2563EB';
+                    const lineAvgAmber = dark ? '#FBBF24' : '#D97706';
+
+                    upsertChart(yearlyCanvas, {
+                        type: 'bar',
+                        data: {
+                            labels: activeYears.map((y) => `${IS_EN ? 'Year' : 'Tahun'} ${y.year}`),
+                            datasets: [
+                                {
+                                    label: 'KG YTD',
+                                    data: activeYears.map((y) => Number(y.ytd_kg || 0)),
+                                    backgroundColor: barEmerald,
+                                    borderRadius: { topLeft: 4, topRight: 4 },
+                                    yAxisID: 'y',
+                                    barPercentage: 0.45,
+                                    maxBarThickness: 44,
+                                    order: 3,
+                                },
+                                {
+                                    type: 'line',
+                                    label: 'COVER YTD',
+                                    data: activeYears.map((y) => Number(y.ytd_cover || 0)),
+                                    borderColor: lineCoverBlue,
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 2.25,
+                                    pointRadius: 4,
+                                    pointBackgroundColor: lineCoverBlue,
+                                    pointBorderColor: chartPointBorderColor(),
+                                    pointBorderWidth: 1.5,
+                                    tension: 0.3,
+                                    yAxisID: 'y1',
+                                    order: 1,
+                                },
+                                {
+                                    type: 'line',
+                                    label: IS_EN ? 'Annual Avg KG/COVER' : 'Rata-rata Tahunan KG/COVER',
+                                    data: activeYears.map((y) => (y.ytd_cover > 0 ? Number(y.avg_kg_per_cover || 0) : null)),
+                                    spanGaps: true,
+                                    borderColor: lineAvgAmber,
+                                    backgroundColor: 'transparent',
+                                    borderDash: [5, 4],
+                                    borderWidth: 2,
+                                    pointRadius: 3.5,
+                                    pointBackgroundColor: lineAvgAmber,
+                                    pointBorderColor: chartPointBorderColor(),
+                                    pointBorderWidth: 1.5,
+                                    tension: 0.3,
+                                    yAxisID: 'y2',
+                                    order: 0,
+                                },
+                            ],
+                        },
+                        options: buildWastageComboOptions(activeYears, 'yearly', {
+                            stacked: false,
+                            yearlyClickable: true,
+                            y1Unit: 'covers',
+                            hasY2: true,
+                        }),
+                    });
+                }
+            } else if (modeVal.startsWith('cat:')) {
+                const yrKey = modeVal.slice(4);
+                const yrRec = yearlyMap.get(yrKey);
+                if (!yrRec || (Number(yrRec.ytd_kg || 0) === 0 && Number(yrRec.days || 0) === 0)) {
+                    Chart.getChart(yearlyCanvas)?.destroy();
+                    renderWastageYearlyEval(null);
+                    if (yearlyMeta) yearlyMeta.textContent = `${IS_EN ? 'Year' : 'Tahun'} ${yrKey} • 0 KG`;
+                    if (yearlyEmpty) {
+                        yearlyEmpty.textContent = IS_EN ? `No food waste data recorded for ${yrKey}.` : `Belum ada data food waste untuk tahun ${yrKey}.`;
+                        yearlyEmpty.classList.remove('hidden');
+                    }
+                } else {
+                    if (yearlyEmpty) yearlyEmpty.classList.add('hidden');
+                    renderWastageYearlyEval(yrRec);
+                    if (yearlyMeta) {
+                        yearlyMeta.textContent = `${IS_EN ? 'Category Breakdown' : 'Komposisi Kategori'} ${yrKey} • ${formatWastageKg(yrRec.ytd_kg)} KG • ${formatWastageInt(yrRec.ytd_cover)} cover`;
+                    }
+                    renderWastageCategoryBreakdownChart(yearlyCanvas, yrRec.categories, dark ? '#34D399' : '#10B981');
+                }
+            } else {
+                const yrKey = modeVal.startsWith('ytd:') ? modeVal.slice(4) : String(wastageChartState.year);
+                const yrRec = yearlyMap.get(yrKey);
+                const slots = [];
+                let lastActiveIdx = -1;
+                for (let m = 1; m <= 12; m++) {
+                    const key = `${yrKey}-${String(m).padStart(2, '0')}`;
+                    const rec = monthlyMap.get(key);
+                    const hasData = !!(rec && (Number(rec.total_kg || 0) > 0 || Number(rec.days || 0) > 0));
+                    if (hasData) lastActiveIdx = m - 1;
+                    slots.push(rec || { month: key, total_kg: 0, covers: 0, days: 0, ytd_kg: 0, ytd_cover: 0, ytd_kg_per_cover: 0 });
+                }
+
+                if (lastActiveIdx === -1) {
+                    Chart.getChart(yearlyCanvas)?.destroy();
+                    renderWastageYearlyEval(null);
+                    if (yearlyMeta) yearlyMeta.textContent = `${IS_EN ? 'YTD Summary' : 'Ringkasan YTD'} ${yrKey} • 0 KG`;
+                    if (yearlyEmpty) {
+                        yearlyEmpty.textContent = IS_EN ? `No YTD food waste records for ${yrKey}.` : `Belum ada data YTD food waste untuk tahun ${yrKey}.`;
+                        yearlyEmpty.classList.remove('hidden');
+                    }
+                } else {
+                    if (yearlyEmpty) yearlyEmpty.classList.add('hidden');
+                    const evalRec = yrRec || {
+                        year: yrKey,
+                        ytd_kg: slots[lastActiveIdx].ytd_kg,
+                        ytd_cover: slots[lastActiveIdx].ytd_cover,
+                        months: lastActiveIdx + 1,
+                        days: slots.reduce((s, r) => s + Number(r.days || 0), 0),
+                        avg_kg_per_cover: slots[lastActiveIdx].ytd_kg_per_cover,
+                        target_next_year_kg_per_cover: Number(slots[lastActiveIdx].ytd_kg_per_cover || 0) * 0.9,
+                    };
+                    renderWastageYearlyEval(evalRec);
+
+                    if (yearlyMeta) {
+                        yearlyMeta.textContent = `${IS_EN ? 'YTD Progress' : 'Progres YTD'} ${yrKey} • ${formatWastageKg(evalRec.ytd_kg)} KG YTD • ${formatWastageInt(evalRec.ytd_cover)} COVER YTD • Avg ${formatWastageRatio(evalRec.avg_kg_per_cover)} KG/Cov`;
+                    }
+
+                    const barEmerald = dark ? '#34D399' : '#10B981';
+                    const lineCoverBlue = dark ? '#60A5FA' : '#2563EB';
+                    const lineAvgAmber = dark ? '#FBBF24' : '#D97706';
+
+                    upsertChart(yearlyCanvas, {
+                        type: 'bar',
+                        data: {
+                            labels: shortNames,
+                            datasets: [
+                                {
+                                    label: 'KG YTD',
+                                    data: slots.map((r, i) => (i <= lastActiveIdx ? Number(r.ytd_kg || 0) : null)),
+                                    backgroundColor: barEmerald,
+                                    borderRadius: { topLeft: 4, topRight: 4 },
+                                    yAxisID: 'y',
+                                    barPercentage: 0.62,
+                                    categoryPercentage: 0.74,
+                                    maxBarThickness: 28,
+                                    order: 3,
+                                },
+                                {
+                                    type: 'line',
+                                    label: 'COVER YTD',
+                                    data: slots.map((r, i) => (i <= lastActiveIdx ? Number(r.ytd_cover || 0) : null)),
+                                    spanGaps: false,
+                                    borderColor: lineCoverBlue,
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 2.25,
+                                    pointRadius: 3.5,
+                                    pointBackgroundColor: lineCoverBlue,
+                                    pointBorderColor: chartPointBorderColor(),
+                                    pointBorderWidth: 1.5,
+                                    tension: 0.3,
+                                    yAxisID: 'y1',
+                                    order: 1,
+                                },
+                                {
+                                    type: 'line',
+                                    label: IS_EN ? 'YTD Avg KG/COVER' : 'Rata-rata KG/COVER YTD',
+                                    data: slots.map((r, i) => (i <= lastActiveIdx && r.ytd_cover > 0 ? Number(r.ytd_kg_per_cover || 0) : null)),
+                                    spanGaps: true,
+                                    borderColor: lineAvgAmber,
+                                    backgroundColor: 'transparent',
+                                    borderDash: [5, 4],
+                                    borderWidth: 2,
+                                    pointRadius: 3,
+                                    pointBackgroundColor: lineAvgAmber,
+                                    pointBorderColor: chartPointBorderColor(),
+                                    pointBorderWidth: 1.5,
+                                    tension: 0.3,
+                                    yAxisID: 'y2',
+                                    order: 0,
+                                },
+                            ],
+                        },
+                        options: buildWastageComboOptions(slots, 'yearly', {
+                            stacked: false,
+                            yearlyYtd: true,
+                            y1Unit: 'covers',
+                            hasY2: true,
+                        }),
+                    });
+                }
+            }
+        }
+    }
+
+    function initWastageCharts() {
+        const dailyCanvas = document.getElementById('wastage-chart-daily');
+        const monthlyCanvas = document.getElementById('wastage-chart-monthly');
+        const yearlyCanvas = document.getElementById('wastage-chart-yearly');
+        if (!dailyCanvas && !monthlyCanvas && !yearlyCanvas) return;
+
+        populateWastageMonthFilter();
+        populateWastageDateFilter();
+        populateWastageYearlyFilter();
+
+        const dateSelect = document.getElementById('wastage-chart-date-filter');
+        const monthSelect = document.getElementById('wastage-chart-month-filter');
+        const yearlySelect = document.getElementById('wastage-chart-yearly-filter');
+        const toggleBtn = document.getElementById('wastage-charts-toggle');
+        const chartsGrid = document.getElementById('wastage-charts-grid');
+
+        monthSelect?.addEventListener('change', () => {
+            const val = monthSelect.value;
+            if (val.startsWith('all:')) {
+                wastageChartState.year = Number(val.slice(4));
+                wastageChartState.month = 'all';
+            } else {
+                wastageChartState.month = val;
+                wastageChartState.year = Number(val.slice(0, 4));
+            }
+            wastageChartState.date = 'last30';
+            populateWastageDateFilter();
+            renderWastageCharts();
+        });
+
+        dateSelect?.addEventListener('change', () => {
+            wastageChartState.date = dateSelect.value;
+            renderWastageCharts();
+        });
+
+        yearlySelect?.addEventListener('change', () => {
+            wastageChartState.yearlyFilter = yearlySelect.value;
+            renderWastageCharts();
+        });
+
+        toggleBtn?.addEventListener('click', () => {
+            if (!chartsGrid) return;
+            const hidden = chartsGrid.classList.toggle('hidden');
+            toggleBtn.textContent = hidden
+                ? (IS_EN ? 'Show Charts' : 'Tampilkan Grafik')
+                : (IS_EN ? 'Hide Charts' : 'Sembunyikan Grafik');
+            if (!hidden) {
+                window.requestAnimationFrame(() => {
+                    ['wastage-chart-daily', 'wastage-chart-monthly', 'wastage-chart-yearly'].forEach((id) => {
+                        const c = document.getElementById(id);
+                        const ch = c ? Chart.getChart(c) : null;
+                        if (ch) {
+                            ch.resize();
+                            ch.update('none');
+                        }
+                    });
+                });
+            }
+        });
+
+        renderWastageCharts();
+    }
+    // [WASTAGE-REPORT] END
 
     function renderPomecImports() {
         const tbody = document.getElementById('pomec-imports-tbody');
@@ -4340,6 +5461,7 @@ function initWorkspace() {
     renderReportHistories();
     renderPomecRecords();
     renderPomecImports();
+    initWastageCharts(); // [WASTAGE-REPORT]
     renderAdminUsers();
     renderAdminAuditLogs();
     renderAuditWorkflowLogs();
@@ -4361,6 +5483,12 @@ function initWorkspace() {
             renderPomecRecords();
         } catch (err) {
             console.error('Failed to refresh POMEC charts on theme switch:', err);
+        }
+        // [WASTAGE-REPORT]
+        try {
+            renderWastageCharts();
+        } catch (err) {
+            console.error('Failed to refresh Wastage charts on theme switch:', err);
         }
     });
 }

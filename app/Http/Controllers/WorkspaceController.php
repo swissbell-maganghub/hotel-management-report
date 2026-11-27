@@ -13,6 +13,8 @@ use App\Models\ReportHistory;
 use App\Models\ReportTemplate;
 use App\Models\TopologyComponent;
 use App\Models\User;
+use App\Models\WastageRecord; // [WASTAGE-REPORT]
+use App\Models\WastageReport; // [WASTAGE-REPORT]
 use App\Services\ChatbotService;
 use App\Services\DatabaseBackupService;
 use App\Services\SystemDiagnosticsService;
@@ -78,6 +80,256 @@ class WorkspaceController extends Controller
         $waterTotal = $canPomec
             ? (float) PomecRecord::where('utility_type', 'water')->sum('water_m3')
             : 0.0;
+
+        // [WASTAGE-REPORT] START: Ambil data Wastage Reports & filter periode bulan Masehi asli
+        $canWastage = $user->canAccessWastage();
+        $canModifyWastage = $user->canModifyWastage();
+        $wastageReports = $canWastage
+            ? WastageReport::with(['importer', 'records'])->latest('period_month')->latest('id')->get()
+            : collect();
+
+        $allWastageDailyRecords = $wastageReports
+            ->flatMap(function (WastageReport $rep) {
+                return $rep->records->map(function (WastageRecord $rec) use ($rep) {
+                    $rec->setRelation('report', $rep);
+
+                    return $rec;
+                });
+            })
+            ->sortBy(fn (WastageRecord $rec) => [$rec->record_date?->format('Y-m-d') ?? '', $rec->id])
+            ->values();
+
+        // Hitung daftar periode bulan Masehi (YYYY-MM) dari tanggal record asli + fallback period_month
+        $periodCounts = [];
+        foreach ($allWastageDailyRecords as $rec) {
+            if ($rec->record_date) {
+                $pKey = $rec->record_date->format('Y-m');
+                $periodCounts[$pKey] = ($periodCounts[$pKey] ?? 0) + 1;
+            }
+        }
+        foreach ($wastageReports as $rep) {
+            if (! array_key_exists($rep->period_month, $periodCounts) && preg_match('/^\d{4}-\d{2}$/', (string) $rep->period_month)) {
+                $periodCounts[$rep->period_month] = 0;
+            }
+        }
+        krsort($periodCounts);
+        $wastagePeriodsWithData = collect($periodCounts);
+
+        // Tentukan periode bulan Masehi terpilih & laporan aktif
+        $requestedPeriod = trim((string) $request->query('period', ''));
+        $hasValidPeriod = (bool) preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $requestedPeriod);
+        $selectedWastageId = $request->query('report_id');
+
+        $findReportForPeriod = function (string $period) use ($wastageReports): ?WastageReport {
+            return $wastageReports->first(function (WastageReport $r) use ($period): bool {
+                return $r->records->contains(fn (WastageRecord $rec) => $rec->record_date?->format('Y-m') === $period)
+                    || $r->period_month === $period;
+            });
+        };
+
+        if ($hasValidPeriod) {
+            $wastageSelectedPeriod = $requestedPeriod;
+            $candidate = $selectedWastageId ? $wastageReports->firstWhere('id', (int) $selectedWastageId) : null;
+            $candidateMatchesPeriod = $candidate && (
+                $candidate->records->contains(fn (WastageRecord $rec) => $rec->record_date?->format('Y-m') === $wastageSelectedPeriod)
+                || $candidate->period_month === $wastageSelectedPeriod
+            );
+            $activeWastageReport = $candidateMatchesPeriod ? $candidate : $findReportForPeriod($wastageSelectedPeriod);
+        } elseif ($selectedWastageId && ($foundReport = $wastageReports->firstWhere('id', (int) $selectedWastageId))) {
+            $activeWastageReport = $foundReport;
+            $wastageSelectedPeriod = $foundReport->records->first()?->record_date?->format('Y-m')
+                ?? $foundReport->period_month
+                ?? date('Y-m');
+        } else {
+            $wastageSelectedPeriod = $wastagePeriodsWithData->keys()->first() ?? date('Y-m');
+            $activeWastageReport = $findReportForPeriod($wastageSelectedPeriod) ?? $wastageReports->first();
+        }
+
+        // Saring baris tabel secara ketat berdasarkan tanggal Masehi asli pada bulan terpilih
+        $wastageDailyRecords = $allWastageDailyRecords
+            ->filter(fn (WastageRecord $rec) => $rec->record_date?->format('Y-m') === $wastageSelectedPeriod)
+            ->values();
+
+        $wastageAvailableYears = $wastagePeriodsWithData->keys()
+            ->map(fn (string $p) => (int) substr($p, 0, 4))
+            ->push((int) substr($wastageSelectedPeriod, 0, 4))
+            ->push((int) date('Y'))
+            ->unique()
+            ->sortDesc()
+            ->values();
+
+        // Data KPI Keseluruhan Wastage atau sesuai filter
+        $totalAllWastageKg = (float) $wastageReports->sum('total_wastage_kg');
+        $totalAllWastageCover = (int) $wastageReports->sum('total_cover');
+        $overallKgPerCover = $totalAllWastageCover > 0 ? round($totalAllWastageKg / $totalAllWastageCover, 4) : 0;
+
+        // Data Grafik Wastage (harian dengan penanda weekend/event, bulanan + MoM, dan tahunan + YTD)
+        $wastageCharts = null;
+        if ($canWastage) {
+            $wasteFieldKeys = array_keys(WastageRecord::WASTE_FIELDS);
+            $computeGroups = static function (array $categories): array {
+                return [
+                    'buffet' => round((float) ($categories['buffet_lunch'] ?? 0) + (float) ($categories['buffet_dinner'] ?? 0) + (float) ($categories['buffet_gravity'] ?? 0), 2),
+                    'preparation' => round((float) ($categories['prep_butcher'] ?? 0) + (float) ($categories['prep_main_kitchen'] ?? 0) + (float) ($categories['prep_pastry'] ?? 0) + (float) ($categories['prep_cold_kitchen'] ?? 0), 2),
+                    'plate_waste' => round((float) ($categories['plate_waste'] ?? 0), 2),
+                    'breakfast_cafe' => round((float) ($categories['breakfast_cafe'] ?? 0), 2),
+                ];
+            };
+
+            $dailyByDate = $wastageReports
+                ->flatMap(fn (WastageReport $report) => $report->records)
+                ->filter(fn (WastageRecord $rec) => $rec->record_date !== null)
+                ->groupBy(fn (WastageRecord $rec) => $rec->record_date->format('Y-m-d'))
+                ->map(function ($group, string $date) use ($wasteFieldKeys): array {
+                    $totalKg = round((float) $group->sum(fn (WastageRecord $r) => (float) $r->total_kg), 2);
+                    $covers = (int) $group->sum(fn (WastageRecord $r) => (int) $r->covers);
+                    $categories = [];
+                    foreach ($wasteFieldKeys as $key) {
+                        $categories[$key] = round((float) $group->sum(fn (WastageRecord $r) => (float) ($r->{$key} ?? 0)), 2);
+                    }
+
+                    $firstDate = $group->first()?->record_date;
+                    $dayOfWeek = $firstDate ? (int) $firstDate->dayOfWeekIso : (int) \Carbon\Carbon::parse($date)->dayOfWeekIso;
+                    $notes = $group->pluck('notes')
+                        ->map(fn ($n) => trim((string) $n))
+                        ->filter()
+                        ->unique()
+                        ->implode('; ');
+
+                    return [
+                        'date' => $date,
+                        'month' => substr($date, 0, 7),
+                        'day_of_week' => $dayOfWeek,
+                        'is_weekend' => in_array($dayOfWeek, [6, 7], true),
+                        'notes' => $notes,
+                        'is_high_cover' => false,
+                        'total_kg' => $totalKg,
+                        'covers' => $covers,
+                        'kg_per_cover' => $covers > 0 ? round($totalKg / $covers, 4) : 0.0,
+                        'categories' => $categories,
+                    ];
+                })
+                ->sortBy('date')
+                ->values();
+
+            $avgDailyCover = $dailyByDate->count() > 0 ? (float) $dailyByDate->avg('covers') : 0.0;
+            $highCoverThreshold = $avgDailyCover > 0 ? round($avgDailyCover * 1.15, 2) : 0.0;
+            $dailyByDate = $dailyByDate->map(function (array $row) use ($highCoverThreshold): array {
+                $row['is_high_cover'] = ($highCoverThreshold > 0 && $row['covers'] >= $highCoverThreshold) || $row['notes'] !== '';
+
+                return $row;
+            })->values();
+
+            $monthlyMap = $dailyByDate
+                ->groupBy('month')
+                ->map(function ($group, string $month) use ($wasteFieldKeys, $computeGroups): array {
+                    $totalKg = round((float) $group->sum('total_kg'), 2);
+                    $covers = (int) $group->sum('covers');
+                    $categories = [];
+                    foreach ($wasteFieldKeys as $key) {
+                        $categories[$key] = round((float) $group->sum(fn (array $d) => (float) ($d['categories'][$key] ?? 0)), 2);
+                    }
+
+                    return [
+                        'month' => $month,
+                        'total_kg' => $totalKg,
+                        'covers' => $covers,
+                        'days' => $group->count(),
+                        'kg_per_cover' => $covers > 0 ? round($totalKg / $covers, 4) : 0.0,
+                        'categories' => $categories,
+                        'groups' => $computeGroups($categories),
+                    ];
+                });
+
+            $zeroCategories = array_fill_keys($wasteFieldKeys, 0.0);
+            foreach ($wastageReports as $rep) {
+                if (! $monthlyMap->has($rep->period_month)) {
+                    $covers = (int) $rep->total_cover;
+                    $totalKg = round((float) $rep->total_wastage_kg, 2);
+                    $monthlyMap->put($rep->period_month, [
+                        'month' => $rep->period_month,
+                        'total_kg' => $totalKg,
+                        'covers' => $covers,
+                        'days' => $rep->records->count(),
+                        'kg_per_cover' => $covers > 0 ? round($totalKg / $covers, 4) : 0.0,
+                        'categories' => $zeroCategories,
+                        'groups' => $computeGroups($zeroCategories),
+                    ]);
+                }
+            }
+
+            $ytdRunningKg = [];
+            $ytdRunningCover = [];
+            $monthlySummary = $monthlyMap
+                ->sortBy('month')
+                ->values()
+                ->map(function (array $m) use (&$ytdRunningKg, &$ytdRunningCover): array {
+                    $yr = substr($m['month'], 0, 4);
+                    $ytdRunningKg[$yr] = round(($ytdRunningKg[$yr] ?? 0.0) + (float) $m['total_kg'], 2);
+                    $ytdRunningCover[$yr] = (int) (($ytdRunningCover[$yr] ?? 0) + (int) $m['covers']);
+                    $m['ytd_kg'] = $ytdRunningKg[$yr];
+                    $m['ytd_cover'] = $ytdRunningCover[$yr];
+                    $m['ytd_kg_per_cover'] = $m['ytd_cover'] > 0 ? round($m['ytd_kg'] / $m['ytd_cover'], 4) : 0.0;
+
+                    return $m;
+                })
+                ->values();
+
+            $yearlySummary = $monthlySummary
+                ->groupBy(fn (array $m) => substr($m['month'], 0, 4))
+                ->map(function ($group, string $year) use ($wasteFieldKeys, $computeGroups): array {
+                    $totalKg = round((float) $group->sum('total_kg'), 2);
+                    $covers = (int) $group->sum('covers');
+                    $days = (int) $group->sum('days');
+                    $avgRatio = $covers > 0 ? round($totalKg / $covers, 4) : 0.0;
+                    $categories = [];
+                    foreach ($wasteFieldKeys as $key) {
+                        $categories[$key] = round((float) $group->sum(fn (array $m) => (float) ($m['categories'][$key] ?? 0)), 2);
+                    }
+
+                    return [
+                        'year' => $year,
+                        'total_kg' => $totalKg,
+                        'covers' => $covers,
+                        'days' => $days,
+                        'months' => $group->count(),
+                        'kg_per_cover' => $avgRatio,
+                        'ytd_kg' => $totalKg,
+                        'ytd_cover' => $covers,
+                        'avg_kg_per_cover' => $avgRatio,
+                        'target_next_year_kg_per_cover' => $avgRatio > 0 ? round($avgRatio * 0.90, 4) : 0.0,
+                        'categories' => $categories,
+                        'groups' => $computeGroups($categories),
+                    ];
+                })
+                ->sortBy('year')
+                ->values();
+
+            $availableYears = $monthlySummary
+                ->map(fn (array $m) => (int) substr($m['month'], 0, 4))
+                ->push((int) date('Y'))
+                ->unique()
+                ->sortDesc()
+                ->values();
+
+            $defaultMonth = $wastageSelectedPeriod;
+            $defaultYear = (int) substr($defaultMonth, 0, 4);
+
+            $wastageCharts = [
+                'daily' => $dailyByDate->all(),
+                'monthly' => $monthlySummary->all(),
+                'yearly' => $yearlySummary->all(),
+                'years' => $availableYears->all(),
+                'defaultMonth' => $defaultMonth,
+                'defaultYear' => $defaultYear,
+                'categoriesMeta' => collect(WastageRecord::WASTE_FIELDS)->map(fn (array $meta, string $key) => [
+                    'key' => $key,
+                    'label' => $meta['label'],
+                    'category' => $meta['category'],
+                ])->values()->all(),
+            ];
+        }
+        // [WASTAGE-REPORT] END
 
         // Topology (IT Admin full control & GM Read-Only)
         $topologyComponents = $user->canViewTopology()
@@ -161,6 +413,11 @@ class WorkspaceController extends Controller
             $allowedTabs[] = 'chatbot';
         }
 
+        // [WASTAGE-REPORT] Menu Wastage Report dibawah Chatbot AI
+        if ($canWastage) {
+            $allowedTabs[] = 'wastage';
+        }
+
         $activeTab = $request->query('tab', 'dashboard');
         if (! in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'dashboard';
@@ -208,6 +465,20 @@ class WorkspaceController extends Controller
             'systemDiagnostics' => $systemDiagnostics,
             'managedUsers' => $managedUsers,
             'auditLogs' => $auditLogs,
+            // [WASTAGE-REPORT] START
+            'canWastage' => $canWastage,
+            'canModifyWastage' => $canModifyWastage,
+            'wastageReports' => $wastageReports,
+            'activeWastageReport' => $activeWastageReport,
+            'wastageDailyRecords' => $wastageDailyRecords,
+            'wastageSelectedPeriod' => $wastageSelectedPeriod,
+            'wastagePeriodsWithData' => $wastagePeriodsWithData,
+            'wastageAvailableYears' => $wastageAvailableYears,
+            'totalAllWastageKg' => $totalAllWastageKg,
+            'totalAllWastageCover' => $totalAllWastageCover,
+            'overallKgPerCover' => $overallKgPerCover,
+            'wastageCharts' => $wastageCharts,
+            // [WASTAGE-REPORT] END
             // Chatbot knowledge base + usage insights (IT Admin): the loop that makes the assistant better over time.
             'chatbotAdmin' => $user->canManageUsers() ? [
                 'knowledge' => ChatbotKnowledge::orderBy('type')->orderByDesc('priority')->orderBy('title')->get(),

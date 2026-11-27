@@ -19,6 +19,7 @@
         'admin' => 'User Management',
         'audit' => 'Audit Trail',
         'chatbot' => $isEn ? 'AI Chatbot' : 'Chatbot AI',
+        'wastage' => 'Wastage Report', // [WASTAGE-REPORT] Menu Wastage Report (English)
     ];
     $tabLabels = array_intersect_key($allTabLabels, array_flip($allowedTabs));
 
@@ -43,6 +44,7 @@
         'pomecRecords' => $pomecRecords,
         'pomecImports' => $pomecImports,
         'gmCharts' => $gmCharts ?? null,
+        'wastageCharts' => $wastageCharts ?? null, // [WASTAGE-REPORT]
         'managedUsers' => $managedUsers,
         'auditLogs' => $auditLogs,
         'backupFiles' => $backupFiles ?? [],
@@ -110,6 +112,9 @@
                                 <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                             @elseif ($tabKey === 'chatbot')
                                 <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                            @elseif ($tabKey === 'wastage')
+                                {{-- [WASTAGE-REPORT] Ikon Waste / Trash Bin untuk Wastage Report --}}
+                                <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                             @else
                                 <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
                             @endif
@@ -320,7 +325,7 @@
         <!-- Main Executive Content -->
         <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
             <!-- KPI Row (2 cols mobile, 4 cols desktop) -->
-            <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <section id="workspace-kpi-row" class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 {{ $activeTab === 'wastage' ? 'hidden' : '' }}">
                 <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)] space-y-2">
                     <div class="text-xs font-medium text-slate-500">{{ $isEn ? 'Total Reports' : 'Total Laporan' }}</div>
                     <div class="flex items-baseline justify-between">
@@ -414,6 +419,13 @@
             @if (! empty($chatbotAdmin))
                 <section id="tab-panel-chatbot" class="workspace-panel {{ $activeTab === 'chatbot' ? '' : 'hidden' }}">
                     @include('workspace.partials.admin-chatbot', ['kb' => $chatbotAdmin['knowledge'], 'ins' => $chatbotAdmin['insights']])
+                </section>
+            @endif
+
+            {{-- [WASTAGE-REPORT] Tab Panel Wastage Report --}}
+            @if ($canWastage)
+                <section id="tab-panel-wastage" class="workspace-panel {{ $activeTab === 'wastage' ? '' : 'hidden' }}">
+                    @include('workspace.partials.tab-wastage')
                 </section>
             @endif
         </main>

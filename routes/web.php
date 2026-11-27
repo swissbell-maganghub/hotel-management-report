@@ -6,6 +6,7 @@ use App\Http\Controllers\ChatbotController;
 use App\Http\Controllers\DepartmentReportController;
 use App\Http\Controllers\PomecController;
 use App\Http\Controllers\TopologyController;
+use App\Http\Controllers\WastageReportController; // [WASTAGE-REPORT]
 use App\Http\Controllers\WorkspaceController;
 use Illuminate\Support\Facades\Route;
 
@@ -38,6 +39,16 @@ Route::middleware(['auth', 'active'])->group(function (): void {
     Route::get('/pomec/template/{utilityType}', [PomecController::class, 'template'])->name('pomec.template');
     Route::get('/pomec/export/{utilityType}/excel', [PomecController::class, 'exportExcel'])->name('pomec.export.excel');
     Route::get('/pomec/export/{utilityType}/pdf', [PomecController::class, 'exportPdf'])->name('pomec.export.pdf');
+
+    // [WASTAGE-REPORT] START: Wastage Report Management (Excel Import + Daily Input + Dashboard)
+    Route::post('/wastage/preview', [WastageReportController::class, 'preview'])->name('wastage.preview');
+    Route::post('/wastage/commit', [WastageReportController::class, 'commit'])->name('wastage.commit');
+    Route::post('/wastage/daily', [WastageReportController::class, 'storeDaily'])->name('wastage.daily');
+    Route::get('/wastage/template', [WastageReportController::class, 'template'])->name('wastage.template');
+    Route::get('/wastage/export/monthly/pdf', [WastageReportController::class, 'exportMonthlyPdf'])->name('wastage.export.monthly.pdf');
+    Route::get('/wastage/{report}/export', [WastageReportController::class, 'export'])->name('wastage.export');
+    Route::delete('/wastage/{report}', [WastageReportController::class, 'destroy'])->name('wastage.destroy');
+    // [WASTAGE-REPORT] END
 
     // System Topology (GM Read-Only & IT Admin Edit/Healthcheck)
     Route::post('/topology/healthcheck', [TopologyController::class, 'runHealthCheck'])->name('topology.healthcheck');

@@ -462,6 +462,11 @@ html.dark .bg-teal\/10 {
     background-color: rgba(72, 184, 199, 0.14);
 }
 
+/* [WASTAGE-REPORT] Dark mode tint untuk baris aktif & header/footer tabel Wastage */
+html.dark .bg-teal\/5 {
+    background-color: rgba(72, 184, 199, 0.08);
+}
+
 /* Semantic badges, alerts & mineral status containers */
 html.dark .bg-emerald-50,
 html.dark .bg-emerald-50\/50,
@@ -491,6 +496,12 @@ html.dark .bg-amber-50\/70,
 html.dark .bg-amber-50\/80,
 html.dark .bg-amber-50\/90 {
     background-color: rgba(245, 158, 11, 0.11);
+}
+
+/* [WASTAGE-REPORT] */
+html.dark .bg-amber-100,
+html.dark .bg-amber-100\/70 {
+    background-color: rgba(245, 158, 11, 0.18);
 }
 
 html.dark .border-amber-200,
@@ -527,9 +538,22 @@ html.dark .text-rose-800 {
 }
 
 html.dark .bg-cyan-50,
+html.dark .bg-cyan-50\/40,
 html.dark .bg-cyan-50\/50,
 html.dark .bg-cyan-50\/70 {
     background-color: rgba(72, 184, 199, 0.11);
+}
+
+/* [WASTAGE-REPORT] */
+html.dark .bg-cyan-100,
+html.dark .bg-cyan-100\/50,
+html.dark .bg-cyan-100\/70 {
+    background-color: rgba(72, 184, 199, 0.18);
+}
+
+/* [WASTAGE-REPORT] Header tabel sky-50 pada mode malam */
+html.dark .bg-sky-50 {
+    background-color: #172030;
 }
 
 html.dark .border-cyan-200,
