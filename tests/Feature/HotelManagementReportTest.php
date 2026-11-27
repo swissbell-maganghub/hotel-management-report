@@ -240,8 +240,8 @@ class HotelManagementReportTest extends TestCase
                 'Sheet1' => [
                     'A3' => [['MONTH : OCTOBER 2026']],
                     'A6' => [
-                        [1, '07,00', null, null, null, 8, null, null, null, 4, 'Ganti Gas'],
-                        [null, '15,00', null, null, null, 8, null, null, null, 2],
+                        [1, '07,00', null, null, null, 8, 5, 12, 25, 4, 'Ganti Gas'],
+                        [null, '15,00', null, null, null, 8, 17, 0, 25, 2, 'Gas Masuk 16 Tbg'],
                         [null, null, null, null, null, null, null, null, 'Total', 6],
                     ],
                 ],
@@ -310,6 +310,14 @@ class HotelManagementReportTest extends TestCase
         }
 
         $this->assertEquals(40, (float) PomecRecord::where('meter_name', 'PLN Laundry')->value('lwbp_value'));
+
+        // Gas: stok dari shift terakhir, tabung datang dari catatan; data lama dilengkapi dari file tersimpan.
+        $gas = PomecRecord::where('utility_type', 'gas')->latest('id')->firstOrFail();
+        $this->assertSame([16, 17, 0, 8], array_values($gas->only(PomecRecord::GAS_STOCK)));
+        $gas->update(array_fill_keys(PomecRecord::GAS_STOCK, null));
+        $this->artisan('pomec:sync-reports')->assertSuccessful();
+        $this->assertSame([16, 17, 0, 8], array_values($gas->fresh()->only(PomecRecord::GAS_STOCK)));
+        $this->assertSame(17, (int) $gas->import->report->rows_data[0]['stock_full']);
         $this->actingAs($staffEng)->get('/?tab=pomec')->assertOk()->assertSee('PLN Laundry')->assertSee('Gas LPG');
 
         // Tanggal gas yang lebih baru tidak boleh menggeser grafik Listrik/Air di dashboard GM.

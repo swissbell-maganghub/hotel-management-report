@@ -109,6 +109,7 @@ class PomecNovemberSampleSeeder extends Seeder
             // Sama dengan rumus impor, jadi tanggal yang sama tidak bisa terhitung dua kali.
             'transaction_hash' => hash('sha256', "{$record->utility_type}|{$date}|{$record->meter_name}"),
             'notes' => 'Data contoh (seeder)',
+            ...$record->only(PomecRecord::GAS_STOCK),
         ];
     }
 }

@@ -54,6 +54,12 @@
                 @if ($type['cost'])
                     <th class="num">Biaya sebelum pajak (Rp)</th>
                 @endif
+                @if ($utilityType === 'gas')
+                    <th class="num">Gas Masuk</th>
+                    <th class="num">Stok Penuh</th>
+                    <th class="num">Stok Kosong</th>
+                    <th class="num">Terpasang</th>
+                @endif
                 <th>Batch Import</th>
                 <th>Catatan</th>
             </tr>
@@ -72,6 +78,11 @@
                     @endif
                     @if ($type['cost'])
                         <td class="num">{{ $rec->cost === null ? '-' : number_format((float) $rec->cost, 0, ',', '.') }}</td>
+                    @endif
+                    @if ($utilityType === 'gas')
+                        @foreach (\App\Models\PomecRecord::GAS_STOCK as $key)
+                            <td class="num">{{ $rec->{$key} ?? '-' }}</td>
+                        @endforeach
                     @endif
                     <td>{{ $rec->import?->batch_code }}</td>
                     <td>{{ $rec->notes }}</td>

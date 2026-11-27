@@ -15,6 +15,9 @@ class PomecRecord extends Model
         'solar' => ['id' => 'Solar Genset', 'en' => 'Genset Diesel', 'unit' => 'liter', 'prefix' => 'SOL', 'cost' => false],
     ];
 
+    /** Khusus gas: tabung yang datang hari itu dan stok akhir hari. */
+    public const GAS_STOCK = ['qty_received', 'stock_full', 'stock_empty', 'stock_installed'];
+
     protected $fillable = [
         'pomec_import_id',
         'utility_type',
@@ -27,6 +30,7 @@ class PomecRecord extends Model
         'cost',
         'transaction_hash',
         'notes',
+        ...self::GAS_STOCK,
     ];
 
     protected function casts(): array
@@ -39,6 +43,10 @@ class PomecRecord extends Model
             'water_m3' => 'decimal:2',
             'total_usage' => 'decimal:2',
             'cost' => 'decimal:2',
+            'qty_received' => 'integer',
+            'stock_full' => 'integer',
+            'stock_empty' => 'integer',
+            'stock_installed' => 'integer',
         ];
     }
 

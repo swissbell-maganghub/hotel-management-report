@@ -37,7 +37,7 @@
                 <span id="pomec-view-label">{{ $isEn ? 'Chart by' : 'Grafik per' }}</span>
                 <div role="group" aria-labelledby="pomec-view-label" class="flex gap-1 p-1 rounded-xl bg-slate-100">
                     @foreach (['day' => $isEn ? 'Day' : 'Hari', 'week' => $isEn ? 'Week' : 'Minggu', 'month' => $isEn ? 'Month' : 'Bulan'] as $key => $label)
-                        <button type="button" data-pomec-view="{{ $key }}" aria-pressed="false" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-navy aria-pressed:bg-white aria-pressed:!text-navy aria-pressed:shadow-sm dark:aria-pressed:bg-[#2C374B] dark:aria-pressed:!text-white transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">{{ $label }}</button>
+                        <button type="button" data-pomec-view="{{ $key }}" aria-pressed="false" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-navy aria-pressed:bg-white aria-pressed:!text-navy aria-pressed:shadow-sm dark:aria-pressed:bg-[#2C374B] dark:aria-pressed:!text-white transition cursor-pointer">{{ $label }}</button>
                     @endforeach
                 </div>
             </div>

@@ -70,7 +70,7 @@ class WorkspaceController extends Controller
             ? PomecRecord::whereDate('reading_date', '>=', Carbon::parse($latestPomecDate)->subMonthsNoOverflow(12)->startOfMonth()->toDateString())
                 ->latest('reading_date')
                 // Hanya kolom yang dipakai grafik dan tabel; semuanya dikirim ke browser.
-                ->get(['id', 'pomec_import_id', 'utility_type', 'reading_date', 'meter_name', 'lwbp_value', 'wbp_value', 'water_m3', 'total_usage', 'cost', 'notes'])
+                ->get(['id', 'pomec_import_id', 'utility_type', 'reading_date', 'meter_name', 'lwbp_value', 'wbp_value', 'water_m3', 'total_usage', 'cost', 'notes', ...PomecRecord::GAS_STOCK])
             : collect();
 
         $electricityTotal = $canPomec

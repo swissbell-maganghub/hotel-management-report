@@ -12,6 +12,7 @@ use App\Models\ReportTemplate;
 use App\Models\User;
 use App\Support\ExcelCell;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -39,7 +40,7 @@ class PomecExcelService
     private const REPORT_COLUMNS = [
         'electricity' => ['date', 'meter', 'lwbp', 'wbp', 'usage', 'cost'],
         'water' => ['date', 'meter', 'usage', 'cost'],
-        'gas' => ['date', 'usage', 'notes'],
+        'gas' => ['date', 'usage', 'received', 'full', 'empty', 'notes'],
         'solar' => ['date', 'usage', 'notes'],
     ];
 
@@ -96,10 +97,14 @@ class PomecExcelService
                 // Tanggal lama dilewati. Kalau angkanya berubah, hanya diberi peringatan: data tersimpan tidak ditimpa.
                 $same = $row['usage'] !== null && abs((float) $existing->total_usage - $row['usage']) < 0.01
                     && (! $hasCost || ($row['cost'] !== null && abs((float) $existing->cost - $row['cost']) < 0.01));
-                $status = $same ? 'existing' : 'changed';
-                if (! $same) {
-                    $rowErrors[] = 'Berbeda dengan yang tersimpan ('.$this->qty($existing->total_usage).' di batch '.$existing->import?->batch_code
-                        .'); tidak ditimpa. Untuk koreksi, minta HOD mengembalikan (Return) laporannya lalu unggah ulang dari laporan itu';
+                // Stok yang belum pernah tersimpan (data lama) tidak dihitung berbeda.
+                $sameStock = collect(PomecRecord::GAS_STOCK)
+                    ->every(fn (string $key) => $existing->{$key} === null || $existing->{$key} === ($row[$key] ?? null));
+                $status = $same && $sameStock ? 'existing' : 'changed';
+                if ($status === 'changed') {
+                    $differs = $same ? 'stok atau gas masuk' : $this->qty($existing->total_usage);
+                    $rowErrors[] = "Berbeda dengan yang tersimpan ({$differs} di batch {$existing->import?->batch_code})"
+                        .'; tidak ditimpa. Untuk koreksi, minta HOD mengembalikan (Return) laporannya lalu unggah ulang dari laporan itu';
                 }
             } else {
                 if ($row['usage'] === null) {
@@ -138,6 +143,7 @@ class PomecExcelService
                 'cost' => $row['cost'] ?? null,
                 'transaction_hash' => $txHash,
                 'notes' => mb_substr($row['notes'] ?? '', 0, 255),
+                ...collect(PomecRecord::GAS_STOCK)->mapWithKeys(fn (string $key) => [$key => $row[$key] ?? null])->all(),
                 'status' => $status,
                 'errors' => $rowErrors,
             ];
@@ -253,8 +259,9 @@ class PomecExcelService
         }
 
         $days = [];
-        // Dua blok berdampingan: kolom hari, jam, jumlah tabung terpasang, pemakaian, catatan.
-        foreach ([['A', 'B', 'F', 'J', 'K'], ['M', 'N', 'R', 'V', 'W']] as [$dayCol, $timeCol, $installedCol, $usageCol, $noteCol]) {
+        // Dua blok berdampingan: hari, jam, tabung terpasang, penuh, kosong, pemakaian, catatan.
+        $blocks = [['A', 'B', 'F', 'G', 'H', 'J', 'K'], ['M', 'N', 'R', 'S', 'T', 'V', 'W']];
+        foreach ($blocks as [$dayCol, $timeCol, $installedCol, $fullCol, $emptyCol, $usageCol, $noteCol]) {
             $day = null;
             for ($r = 6; $r <= $sheet->getHighestDataRow(); $r++) {
                 $day = $this->number($sheet, $dayCol.$r) ?? $day;
@@ -267,7 +274,16 @@ class PomecExcelService
                 }
 
                 $date = sprintf('%s-%02d', $period, $day);
-                $days[$date] ??= ['date' => $date, 'meter' => 'Gas LPG Dapur', 'usage' => 0.0, 'notes' => ''];
+                $days[$date] ??= ['date' => $date, 'meter' => 'Gas LPG Dapur', 'usage' => 0.0, 'notes' => '',
+                    'qty_received' => 0, 'stock_full' => null, 'stock_empty' => null, 'stock_installed' => null];
+
+                // Stok akhir hari = isian shift terakhir yang terisi.
+                foreach (['stock_installed' => $installedCol, 'stock_full' => $fullCol, 'stock_empty' => $emptyCol] as $key => $col) {
+                    $stock = $this->number($sheet, $col.$r);
+                    if ($stock !== null) {
+                        $days[$date][$key] = (int) $stock;
+                    }
+                }
 
                 if (! $this->isEmpty($usage)) {
                     $days[$date]['usage'] = is_numeric($usage) && $days[$date]['usage'] !== null
@@ -277,6 +293,10 @@ class PomecExcelService
                 $note = trim((string) $this->value($sheet, $noteCol.$r));
                 if ($note !== '') {
                     $days[$date]['notes'] = ltrim($days[$date]['notes'].'; '.$note, '; ');
+                }
+                // Jumlah tabung yang datang hanya tertulis di catatan, mis. "Gas Masuk 16 Tbg".
+                if (preg_match('/masuk\s+(\d+)/i', $note, $in)) {
+                    $days[$date]['qty_received'] += (int) $in[1];
                 }
             }
         }
@@ -449,6 +469,7 @@ class PomecExcelService
                     'cost' => $row['cost'],
                     'transaction_hash' => $row['transaction_hash'],
                     'notes' => $row['notes'],
+                    ...Arr::only($row, PomecRecord::GAS_STOCK),
                 ]);
             }
 
@@ -502,6 +523,9 @@ class PomecExcelService
             'wbp' => ['key' => 'wbp_value', 'label' => 'WBP (kWh)', 'label_en' => 'WBP (kWh)', 'type' => 'number', 'sum' => true],
             'usage' => ['key' => 'total_usage', 'label' => "Pemakaian ({$unit})", 'label_en' => "Usage ({$unit})", 'type' => 'number', 'sum' => true],
             'cost' => ['key' => 'cost', 'label' => 'Biaya sebelum pajak (Rp)', 'label_en' => 'Cost before tax (IDR)', 'type' => 'currency', 'sum' => true],
+            'received' => ['key' => 'qty_received', 'label' => 'Gas Masuk', 'label_en' => 'Received', 'type' => 'number', 'sum' => true],
+            'full' => ['key' => 'stock_full', 'label' => 'Stok Penuh', 'label_en' => 'Full Stock', 'type' => 'number'],
+            'empty' => ['key' => 'stock_empty', 'label' => 'Stok Kosong', 'label_en' => 'Empty Stock', 'type' => 'number'],
             'notes' => ['key' => 'notes', 'label' => 'Catatan', 'label_en' => 'Notes', 'type' => 'text'],
         ];
 
@@ -526,6 +550,38 @@ class PomecExcelService
         }
 
         return $imports->count();
+    }
+
+    /** Melengkapi stok gas pada unggahan lama dari file asli yang tersimpan. Hasil: jumlah baris terisi. */
+    public function backfillGasStock(): int
+    {
+        $filled = 0;
+        $imports = PomecImport::with('report')->where('utility_type', 'gas')->whereNotNull('stored_path')
+            ->whereHas('records', fn ($q) => $q->whereNull('stock_full'))->get();
+
+        foreach ($imports as $import) {
+            if (! Storage::disk('local')->exists($import->stored_path)) {
+                continue;
+            }
+            $workbook = IOFactory::load(Storage::disk('local')->path($import->stored_path));
+            $days = collect($this->readGas($workbook, $import->period_month))->keyBy('date');
+
+            DB::transaction(function () use ($import, $days, &$filled): void {
+                foreach ($import->records()->whereNull('stock_full')->get() as $record) {
+                    $day = $days[$record->reading_date->toDateString()] ?? null;
+                    if ($day && $day['stock_full'] !== null) {
+                        $record->update(Arr::only($day, PomecRecord::GAS_STOCK));
+                        $filled++;
+                    }
+                }
+                if ($import->report) {
+                    $this->fillReport($import->report, $import);
+                    $import->report->save();
+                }
+            });
+        }
+
+        return $filled;
     }
 
     private function createReport(PomecImport $import, User $user, string $status, ?string $note = null): DepartmentReport
@@ -570,6 +626,7 @@ class PomecExcelService
         $days = $records->pluck('reading_date')->map->toDateString()->unique()->count();
         $usage = (float) $records->sum('total_usage');
         $cost = $records->whereNotNull('cost')->sum('cost');
+        $lastStock = $records->whereNotNull('stock_full')->last();
         $template = $this->reportTemplate($import->utility_type);
         $keys = array_column($template->columns_schema, 'key');
 
@@ -585,6 +642,7 @@ class PomecExcelService
             }])->all())->values()->all(),
             'summary_notes' => 'Total '.$this->qty($usage)." {$type['unit']}"
                 .($type['cost'] ? ' · Rp '.number_format((float) $cost, 0, ',', '.').' (sebelum pajak)' : '')
+                .($lastStock ? " · gas masuk {$records->sum('qty_received')} · stok penuh akhir {$lastStock->stock_full}" : '')
                 ." · {$days} hari · batch {$import->batch_code}.",
         ]);
     }
@@ -634,6 +692,7 @@ class PomecExcelService
 
         $type = PomecRecord::TYPES[$utilityType];
         $isElec = $utilityType === 'electricity';
+        $isGas = $utilityType === 'gas';
 
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
@@ -647,6 +706,7 @@ class PomecExcelService
             'Meter',
             ...($isElec ? ['LWBP (kWh)', 'WBP (kWh)', 'Total (kWh)'] : ["Pemakaian ({$type['unit']})"]),
             ...($type['cost'] ? ['Biaya sebelum pajak (Rp)'] : []),
+            ...($isGas ? ['Gas Masuk', 'Stok Penuh', 'Stok Kosong', 'Terpasang'] : []),
             'Batch Import',
             'Catatan',
         ];
@@ -667,6 +727,7 @@ class PomecExcelService
                     ? [(float) $record->lwbp_value, (float) $record->wbp_value, (float) $record->total_usage]
                     : [(float) $record->total_usage]),
                 ...($type['cost'] ? [$record->cost === null ? null : (float) $record->cost] : []),
+                ...($isGas ? array_map(fn (string $key) => $record->{$key}, PomecRecord::GAS_STOCK) : []),
                 ExcelCell::sanitize((string) $record->import?->batch_code),
                 ExcelCell::sanitize((string) $record->notes),
             ], null, "A{$rowNum}", true);

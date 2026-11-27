@@ -2001,7 +2001,7 @@ function initWorkspace() {
                                     let val = r[c.key] ?? '';
                                     if (c.type === 'date' && val) val = formatWitaDateLabel(val, IS_EN);
                                     else if (c.type === 'currency' && val !== null && val !== '' && !isNaN(val)) val = 'Rp ' + Math.round(Number(val)).toLocaleString('id-ID');
-                                    else if (c.type === 'number' && !isNaN(val)) val = Number(val).toLocaleString('id-ID');
+                                    else if (c.type === 'number' && val !== '' && !isNaN(val)) val = Number(val).toLocaleString('id-ID');
                                     return `<td class="py-3 px-4 ${['number', 'currency'].includes(c.type) ? 'text-right font-mono-num font-medium whitespace-nowrap' : ''}">${escapeHtml(val)}</td>`;
                                 }).join('')}
                             </tr>
@@ -2177,9 +2177,6 @@ function initWorkspace() {
     })[type];
     // Hari disebut menonjol kalau minimal 25% di atas rata-rata.
     const POMEC_HIGH = 1.25;
-    // Gas dipakai per ganti tabung dan solar sesekali: per hari tidak terbaca, jadi digambar mingguan.
-    const POMEC_SPARSE = ['gas', 'solar'];
-    const pomecViewFor = (type) => (pomecView === 'day' && POMEC_SPARSE.includes(type) ? 'week' : pomecView);
     const pomecPeriod = (view) => ({ day: IS_EN ? 'Daily' : 'Harian', week: IS_EN ? 'Weekly' : 'Mingguan', month: IS_EN ? 'Monthly' : 'Bulanan' })[view];
     const pomecLabel = (type) => POMEC_TYPES[type]?.[IS_EN ? 'en' : 'id'] || type;
     const pomecUnit = (type) => POMEC_TYPES[type]?.unit || '';
@@ -2266,6 +2263,25 @@ function initWorkspace() {
             [IS_EN ? 'Average per day' : 'Rata-rata per hari', `${pomecQty(pomecDailyAverage(rows))} ${unit}`, trend.text, trend.tone],
             [IS_EN ? 'Highest day' : 'Hari tertinggi', `${pomecQty(peak)} ${unit}`, peakDate ? formatWitaDateLabel(peakDate, IS_EN) : ''],
         );
+
+        // Gas: yang dipantau pengiriman dan sisa stok; "hari tertinggi" selalu sama dengan satu kali ganti tabung.
+        const stocked = rows.filter((r) => r.stock_full != null).sort((a, b) => a.reading_date.localeCompare(b.reading_date));
+        if (stocked.length) {
+            const last = stocked[stocked.length - 1];
+            const deliveries = stocked.filter((r) => r.qty_received > 0);
+            const used = days.filter(([, v]) => v > 0).length;
+            items[0][2] = IS_EN ? `Used on ${used} of ${days.length} days` : `${used} dari ${days.length} hari ada pemakaian`;
+            items[1] = [
+                IS_EN ? 'Gas received' : 'Gas masuk',
+                `${pomecQty(pomecSum(deliveries, 'qty_received'))} ${unit}`,
+                `${deliveries.length} ${IS_EN ? 'deliveries' : 'kali pengiriman'}`,
+            ];
+            items[3] = [
+                IS_EN ? 'Latest full stock' : 'Stok penuh terakhir',
+                `${pomecQty(last.stock_full)} ${unit}`,
+                `${formatWitaDateLabel(last.reading_date, IS_EN)} · ${last.stock_empty ?? '-'} ${IS_EN ? 'empty' : 'kosong'} · ${last.stock_installed ?? '-'} ${IS_EN ? 'installed' : 'terpasang'}`,
+            ];
+        }
 
         stats.innerHTML = items.map(([label, value, hint, tone = 'text-slate-400']) => `<div>
             <dt class="text-[11px] text-slate-500">${label}</dt>
@@ -2415,11 +2431,8 @@ function initWorkspace() {
             tab.setAttribute('aria-pressed', tab.dataset.pomecOpen === pomecType ? 'true' : 'false');
         });
 
-        // Tombol mengikuti grafik yang benar-benar tampil: gas dan solar tidak punya grafik harian.
         document.querySelectorAll('[data-pomec-view]').forEach((btn) => {
-            btn.setAttribute('aria-pressed', btn.dataset.pomecView === pomecViewFor(pomecType) ? 'true' : 'false');
-            btn.disabled = btn.dataset.pomecView === 'day' && POMEC_SPARSE.includes(pomecType);
-            btn.title = btn.disabled ? (IS_EN ? 'Gas and diesel are charted per week' : 'Gas dan solar digambar per minggu') : '';
+            btn.setAttribute('aria-pressed', btn.dataset.pomecView === pomecView ? 'true' : 'false');
         });
 
         const showAll = pomecType === 'all';
@@ -2436,7 +2449,7 @@ function initWorkspace() {
             day: IS_EN ? 'Daily usage' : 'Pemakaian harian',
             week: IS_EN ? 'Weekly usage' : 'Pemakaian mingguan',
             month: IS_EN ? 'Monthly usage' : 'Pemakaian bulanan',
-        }[pomecViewFor(pomecType)];
+        }[pomecView];
         document.getElementById('pomec-detail-note').textContent = `${usageTitle} (${pomecUnit(pomecType)})`;
         ['excel', 'pdf'].forEach((format) => {
             const link = document.getElementById(`pomec-export-${format}`);
@@ -2480,6 +2493,16 @@ function initWorkspace() {
                     tdClass: 'font-mono-num text-slate-600 whitespace-nowrap',
                     cell: (r) => (r.cost === null ? dash : Math.round(Number(r.cost)).toLocaleString('id-ID')),
                 },
+                ...[['qty_received', 'Received', 'Gas Masuk'], ['stock_full', 'Full Stock', 'Stok Penuh'], ['stock_empty', 'Empty Stock', 'Stok Kosong']].map(([id, en, local]) => ({
+                    id,
+                    header: () => (IS_EN ? en : local),
+                    accessor: (r) => r[id] ?? -1,
+                    align: 'right',
+                    visible: () => pomecType === 'gas',
+                    tdClass: 'font-mono-num text-slate-600 whitespace-nowrap',
+                    // Gas masuk 0 dikosongkan supaya hari pengiriman langsung terlihat.
+                    cell: (r) => (r[id] == null || (id === 'qty_received' && !r[id]) ? dash : pomecQty(r[id])),
+                })),
                 { id: 'notes', header: () => (IS_EN ? 'Notes' : 'Catatan'), tdClass: 'text-slate-500 min-w-[160px]', cell: (r) => (r.notes ? escapeHtml(r.notes) : dash) },
             ],
         });
@@ -2638,7 +2661,8 @@ function initWorkspace() {
     const pomecChartRows = (monthRows, allRows) => (pomecView === 'month' ? allRows : monthRows);
 
     // series = [{ label, rows, key, color }]
-    function pomecDrawChart(canvas, series, { name, format, legend = false, ticks = 6, view = pomecView }) {
+    function pomecDrawChart(canvas, series, { name, format, legend = false, ticks = 6 }) {
+        const view = pomecView;
         // Tanggal tercatat per kelompok, dihitung sekali jalan.
         const recorded = {};
         series.forEach((item) => item.rows.forEach((r) => {
@@ -2720,7 +2744,6 @@ function initWorkspace() {
                     : `${IS_EN ? 'Average' : 'Rata-rata'} ${pomecQty(pomecDailyAverage(rows))} ${pomecUnit(type)}/${IS_EN ? 'day' : 'hari'}`;
                 // Jumlah hari hanya disebut kalau bulannya belum lengkap.
                 if (recorded < daysInMonth) sub += ` · ${recorded}/${daysInMonth} ${IS_EN ? 'days' : 'hari'}`;
-                if (pomecViewFor(type) !== pomecView) sub += IS_EN ? ' · weekly chart' : ' · grafik per minggu';
             }
             card.querySelector('[data-total]').textContent = pomecQty(pomecSum(rows, 'total_usage'));
             card.querySelector('[data-sub]').textContent = sub;
@@ -2741,7 +2764,6 @@ function initWorkspace() {
                     // Satuan sudah tertulis di kartu, sumbu dan angka batang cukup angkanya.
                     format: (v, short) => (short ? pomecQty(v) : `${pomecQty(v)} ${pomecUnit(type)}`),
                     ticks: 4,
-                    view: pomecViewFor(type),
                 },
             );
         });
@@ -2774,7 +2796,6 @@ function initWorkspace() {
             name: `${IS_EN ? 'Usage' : 'Pemakaian'} ${pomecLabel(pomecType)}`,
             format: (v, short) => (short ? pomecQty(v) : `${pomecQty(v)} ${unit}`),
             legend: true,
-            view: pomecViewFor(pomecType),
         });
     }
 
@@ -3119,7 +3140,7 @@ function initWorkspace() {
                         <div class="font-medium text-navy">${escapeHtml(r.meter_name)}</div>
                         ${r.errors?.length ? `<div class="text-[11px] mt-0.5 ${r.status === 'changed' ? 'text-amber-800' : 'text-crimson-dark'}">${escapeHtml(r.errors.join(', '))}</div>` : ''}
                     </td>
-                    <td class="py-2.5 px-4 text-right font-mono-num whitespace-nowrap">${pomecQty(r.total_usage)} ${pomecUnit(p.utility_type)}${r.cost === null ? '' : `<div class="text-[10px] text-slate-500">${pomecRupiah(r.cost)}</div>`}</td>
+                    <td class="py-2.5 px-4 text-right font-mono-num whitespace-nowrap">${pomecQty(r.total_usage)} ${pomecUnit(p.utility_type)}${r.cost === null ? '' : `<div class="text-[10px] text-slate-500">${pomecRupiah(r.cost)}</div>`}${r.stock_full == null ? '' : `<div class="text-[10px] text-slate-500">${IS_EN ? 'in' : 'masuk'} ${r.qty_received} · ${IS_EN ? 'full' : 'penuh'} ${r.stock_full} · ${IS_EN ? 'empty' : 'kosong'} ${r.stock_empty ?? '-'}</div>`}</td>
                     <td class="py-2.5 px-4 whitespace-nowrap">
                         <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusTone[r.status]}">${statusLabel[r.status]}</span>
                     </td>
